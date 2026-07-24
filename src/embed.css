@@ -577,15 +577,13 @@ body {
 }
 
 @media (max-width: 720px) {
-  /* Let the document grow so publications can sit below the map and
-     the parent iframe can auto-resize via quebec-map:resize. */
+  /* Size to content only — min-height:100% left an empty transparent hit-area
+     under the map that trapped touches inside the iframe. */
   html.qc-embed,
   body.qc-embed-body {
     overflow: visible;
     height: auto;
-    min-height: 100%;
-    /* Allow touch-scroll to chain to the Squarespace parent when the
-       iframe is already sized to its content (nothing left to scroll inside). */
+    min-height: 0;
     overscroll-behavior: auto;
   }
 
@@ -593,21 +591,21 @@ body {
   body,
   #root {
     height: auto;
-    min-height: 100%;
-    touch-action: pan-y;
+    min-height: 0;
   }
 
   .qc-map-root {
     height: auto;
-    min-height: 100%;
-    touch-action: pan-y;
+    min-height: 0;
+    /* Empty root padding must not steal gestures from the host page. */
+    pointer-events: none;
   }
 
   .qc-map-body {
     flex: none;
     flex-direction: column;
     overflow: visible;
-    touch-action: pan-y;
+    pointer-events: none;
   }
 
   .qc-map-stage {
@@ -616,9 +614,9 @@ body {
     height: min(100vw, 560px);
     min-height: 320px;
     overflow: hidden;
-    /* Map pan/pinch stay on the map; don't chain those gestures up. */
     overscroll-behavior: none;
     touch-action: manipulation;
+    pointer-events: auto;
   }
 
   .qc-map-stage .leaflet-container {
@@ -661,6 +659,10 @@ body {
   .qc-map-pubs {
     padding: 1rem 0.85rem 1.25rem;
     touch-action: pan-y;
+  }
+
+  .qc-map-status {
+    pointer-events: auto;
   }
 }
 

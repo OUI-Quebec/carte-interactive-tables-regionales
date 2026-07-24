@@ -156,13 +156,91 @@ export function mountQuebecRegionsMap(el, config) {
     window.clearTimeout(heightNotifyTimer);
     heightNotifyTimer = window.setTimeout(() => {
       if (destroyed || !isMobileViewport()) return;
-      // Measure the map root only — document scrollHeight is inflated by
-      // min-height:100% to the current iframe viewport and won't shrink.
-      const height = Math.max(320, Math.ceil(el.getBoundingClientRect().height));
+      // Measure map + open pubs only (ignore inflated root min-heights).
+      const stage = el.querySelector('.qc-map-stage');
+      const pubs = pubsPane;
+      let height = stage ? stage.getBoundingClientRect().height : 0;
+      if (pubs && pubs.classList.contains('is-open')) {
+        height += pubs.getBoundingClientRect().height;
+      }
+      const status = el.querySelector('.qc-map-status');
+      if (status && !status.hidden) {
+        height += status.getBoundingClientRect().height;
+      }
+      height = Math.max(320, Math.ceil(height));
       if (Math.abs(height - lastPostedHeight) < 2) return;
       lastPostedHeight = height;
       window.parent.postMessage({ type: 'quebec-map:resize', height }, '*');
     }, 50);
+  }
+
+  /**
+   * Mobile iframe trap: touches on publications / empty iframe chrome never
+   * reach the Squarespace page. Forward vertical swipes to the parent.
+   */
+  function setupParentScrollBridge() {
+    if (typeof window === 'undefined' || window.parent === window) return;
+
+    let lastY = 0;
+    let active = false;
+
+    const touchIsOutsideMap = (target, touch) => {
+      if (target instanceof Element && target.closest('.qc-map-stage')) {
+        return false;
+      }
+      if (touch) {
+        const under = document.elementFromPoint(touch.clientX, touch.clientY);
+        if (under instanceof Element && under.closest('.qc-map-stage')) {
+          return false;
+        }
+      }
+      return true;
+    };
+
+    const onTouchStart = (e) => {
+      if (!isMobileViewport() || !e.touches?.[0]) {
+        active = false;
+        return;
+      }
+      if (!touchIsOutsideMap(e.target, e.touches[0])) {
+        active = false;
+        return;
+      }
+      active = true;
+      lastY = e.touches[0].clientY;
+    };
+
+    const onTouchMove = (e) => {
+      if (!active || !isMobileViewport() || !e.touches?.[0]) return;
+      if (!touchIsOutsideMap(e.target, e.touches[0])) {
+        active = false;
+        return;
+      }
+      const y = e.touches[0].clientY;
+      const dy = lastY - y;
+      lastY = y;
+      if (dy === 0) return;
+      e.preventDefault();
+      window.parent.postMessage({ type: 'quebec-map:scrollBy', dy }, '*');
+    };
+
+    const end = () => {
+      active = false;
+    };
+
+    document.addEventListener('touchstart', onTouchStart, {
+      passive: true,
+      capture: true
+    });
+    document.addEventListener('touchmove', onTouchMove, {
+      passive: false,
+      capture: true
+    });
+    document.addEventListener('touchend', end, { passive: true, capture: true });
+    document.addEventListener('touchcancel', end, {
+      passive: true,
+      capture: true
+    });
   }
 
   /** On-map name labels for large peripheral regions (from maps-test). */
@@ -190,8 +268,8 @@ export function mountQuebecRegionsMap(el, config) {
   const MAP_LABEL_BOUNDS_FRAC = {
     // A bit left + lower than the bounds center
     '02': { x: -0.1, y: 0.2 },
-    // ~3 line-heights lower than center (was sitting too high)
-    '08': { x: -0.04, y: 0.28 },
+    // Same upward step again as 0.28 → 0.14
+    '08': { x: -0.04, y: 0 },
     '09': { x: 0.06, y: 0.12 }
   };
 
@@ -1824,6 +1902,7 @@ export function mountQuebecRegionsMap(el, config) {
 
   applyZoomMode();
   syncMobileChrome();
+  setupParentScrollBridge();
 
   requestAnimationFrame(() => {
     map.invalidateSize();

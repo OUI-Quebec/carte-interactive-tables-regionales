@@ -23,6 +23,7 @@
   var MSG_SET = 'quebec-map:setContent';
   var MSG_READY = 'quebec-map:ready';
   var MSG_RESIZE = 'quebec-map:resize';
+  var MSG_SCROLL = 'quebec-map:scrollBy';
 
   var REGIONS = [
     { id: '01', name: 'Bas-Saint-Laurent', shortName: 'Bas-Saint-Laurent' },
@@ -266,6 +267,14 @@
       }
       if (data.type === MSG_RESIZE && data.height != null) {
         applyHeight(data.height);
+        return;
+      }
+      if (data.type === MSG_SCROLL && data.dy != null) {
+        // Mobile: iframe chrome / publications forwarded a vertical swipe.
+        var dy = Number(data.dy);
+        if (isFinite(dy) && dy !== 0) {
+          global.scrollBy(0, dy);
+        }
       }
     }
 
