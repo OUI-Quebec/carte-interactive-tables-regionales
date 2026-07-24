@@ -1,0 +1,71 @@
+{
+  "$schema": "./map-config.schema.json",
+  "title": "Régions administratives du Québec",
+  "geoUrl": "geo/regions-admin.json",
+  "view": {
+    "center": [53.2, -71.5],
+    "zoom": 6,
+    "maxZoom": 10,
+    "fitFill": 0.8,
+    "maxBoundsViscosity": 1
+  },
+  "ui": {
+    "showLegend": true,
+    "interactive": true,
+    "showMontrealInset": true
+  },
+  "style": {
+    "strokeWidth": 3.5,
+    "strokeDarken": 0.45,
+    "background": "#EEF8FA",
+    "pulseColor": "#7EB6FF"
+  },
+  "layout": {
+    "gap": 0.012,
+    "ripple": false,
+    "focusRegionId": "06",
+    "focusLon": -73.65,
+    "focusLat": 45.52,
+    "centerScale": 2.5,
+    "edgeScaleX": 0.55,
+    "edgeScaleY": 0.6,
+    "northScaleX": 0.9,
+    "eastScaleY": 0.75,
+    "edgePull": 1,
+    "focusRadiusDeg": 14,
+    "placeGap": 0.22,
+    "placeIterations": 55,
+    "homePull": 0.1,
+    "globalScaleX": 0.9,
+    "globalScaleY": 1,
+    "manualOffsets": {
+      "02": { "dx": 0.010986, "dy": 0.02118 },
+      "09": { "dx": 0, "dy": 0.006135 },
+      "10": { "dx": 0.010986, "dy": -0.260152 }
+    },
+    "manualScales": {
+      "02": { "sx": 1, "sy": 0.7 },
+      "09": { "sx": 1, "sy": 0.7 },
+      "10": { "sx": 1, "sy": 0.7 }
+    }
+  },
+  "regions": [
+    { "id": "01", "name": "Bas-Saint-Laurent", "shortName": "Bas-Saint-Laurent", "color": "#E8A8C8", "visible": true },
+    { "id": "02", "name": "Saguenay–Lac-Saint-Jean", "shortName": "Saguenay–Lac-Saint-Jean", "color": "#7EC8E3", "visible": true },
+    { "id": "03", "name": "Capitale-Nationale", "shortName": "Capitale-Nationale", "color": "#F5C842", "visible": true },
+    { "id": "04", "name": "Mauricie", "color": "#5B9BD5", "visible": true },
+    { "id": "05", "name": "Estrie", "color": "#70AD47", "visible": true },
+    { "id": "06", "name": "Montréal", "color": "#ED7A9B", "visible": true },
+    { "id": "07", "name": "Outaouais", "color": "#F4A460", "visible": true },
+    { "id": "08", "name": "Abitibi-Témiscamingue", "shortName": "Abitibi-Témiscamingue", "color": "#C5A3D9", "visible": true },
+    { "id": "09", "name": "Côte-Nord", "color": "#A9D08E", "visible": true },
+    { "id": "10", "name": "Nord-du-Québec", "color": "#9DC3E6", "visible": true },
+    { "id": "11", "name": "Gaspésie–Îles-de-la-Madeleine", "shortName": "Gaspésie–Îles-de-la-Madeleine", "color": "#FFE699", "visible": true },
+    { "id": "12", "name": "Chaudière-Appalaches", "shortName": "Chaudière-Appalaches", "color": "#F4B183", "visible": true },
+    { "id": "13", "name": "Laval", "color": "#2F5496", "visible": true },
+    { "id": "14", "name": "Lanaudière", "color": "#C45911", "visible": true },
+    { "id": "15", "name": "Laurentides", "color": "#548235", "visible": true },
+    { "id": "16", "name": "Montérégie", "color": "#7030A0", "visible": true },
+    { "id": "17", "name": "Centre-du-Québec", "shortName": "Centre-du-Québec", "color": "#C00000", "visible": true }
+  ]
+}

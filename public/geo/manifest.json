@@ -1,0 +1,77 @@
+{
+  "source": "MRNF Découpages administratifs (CC-BY 4.0)",
+  "layer": 0,
+  "name": "Région administrative",
+  "regionCount": 17,
+  "regions": [
+    {
+      "id": "01",
+      "name": "Bas-Saint-Laurent"
+    },
+    {
+      "id": "02",
+      "name": "Saguenay–Lac-Saint-Jean"
+    },
+    {
+      "id": "03",
+      "name": "Capitale-Nationale"
+    },
+    {
+      "id": "04",
+      "name": "Mauricie"
+    },
+    {
+      "id": "05",
+      "name": "Estrie"
+    },
+    {
+      "id": "06",
+      "name": "Montréal"
+    },
+    {
+      "id": "07",
+      "name": "Outaouais"
+    },
+    {
+      "id": "08",
+      "name": "Abitibi-Témiscamingue"
+    },
+    {
+      "id": "09",
+      "name": "Côte-Nord"
+    },
+    {
+      "id": "10",
+      "name": "Nord-du-Québec"
+    },
+    {
+      "id": "11",
+      "name": "Gaspésie–Îles-de-la-Madeleine"
+    },
+    {
+      "id": "12",
+      "name": "Chaudière-Appalaches"
+    },
+    {
+      "id": "13",
+      "name": "Laval"
+    },
+    {
+      "id": "14",
+      "name": "Lanaudière"
+    },
+    {
+      "id": "15",
+      "name": "Laurentides"
+    },
+    {
+      "id": "16",
+      "name": "Montérégie"
+    },
+    {
+      "id": "17",
+      "name": "Centre-du-Québec"
+    }
+  ],
+  "fetchedAt": "2026-07-23T19:18:50.173Z"
+}
