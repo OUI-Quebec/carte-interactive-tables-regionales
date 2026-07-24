@@ -1804,6 +1804,23 @@ export function mountQuebecRegionsMap(el, config) {
         activate();
       }
     });
+    // Same map “pop” as hovering the region polygon.
+    item.addEventListener('mouseenter', () => {
+      if (!interactiveRegions()) return;
+      setHoveredRegion(item.dataset.id);
+    });
+    item.addEventListener('mouseleave', () => {
+      if (!interactiveRegions()) return;
+      setHoveredRegion(null);
+    });
+    item.addEventListener('focus', () => {
+      if (!interactiveRegions()) return;
+      setHoveredRegion(item.dataset.id);
+    });
+    item.addEventListener('blur', () => {
+      if (!interactiveRegions()) return;
+      setHoveredRegion(null);
+    });
   });
 
   if (pubsCloseBtn) {
