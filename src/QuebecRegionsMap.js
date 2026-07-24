@@ -204,6 +204,14 @@ export function mountQuebecRegionsMap(el, config) {
       window.parent.postMessage({ type: 'quebec-map:scrollBy', dy }, '*');
     };
 
+    /** Normalize wheel delta to approximate CSS pixels. */
+    const wheelDeltaY = (e) => {
+      let dy = e.deltaY;
+      if (e.deltaMode === 1) dy *= 16; // lines → px
+      if (e.deltaMode === 2) dy *= window.innerHeight || 800; // pages
+      return dy;
+    };
+
     /** True when the floating pubs drawer should consume this wheel itself. */
     const pubsConsumesWheel = (e) => {
       if (isMobileViewport()) return false;
@@ -257,9 +265,11 @@ export function mountQuebecRegionsMap(el, config) {
 
     const onWheel = (e) => {
       if (pubsConsumesWheel(e)) return;
-      // Desktop: always forward (zoom is off). Mobile: forward wheel too.
+      const dy = wheelDeltaY(e);
+      if (!dy) return;
       e.preventDefault();
-      scrollParentBy(e.deltaY);
+      e.stopPropagation();
+      scrollParentBy(dy);
     };
 
     document.addEventListener('touchstart', onTouchStart, {
@@ -275,6 +285,7 @@ export function mountQuebecRegionsMap(el, config) {
       passive: true,
       capture: true
     });
+    // Capture so nested Leaflet SVG still hits us; document covers the full frame.
     document.addEventListener('wheel', onWheel, {
       passive: false,
       capture: true

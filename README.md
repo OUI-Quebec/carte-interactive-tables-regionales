@@ -58,6 +58,8 @@ The map **does not** fetch Squarespace JSON (CORS). The parent page loads `?form
 
 On mobile, publications render **below** the map. The iframe starts at a fixed height (e.g. `720px`); the bridge then grows it when the map posts `quebec-map:resize`. Keep using `squarespace-bridge.js` so that works — Squarespace will not stretch a bare iframe on its own.
 
+Wheel / touch over the map is forwarded to the host via `quebec-map:scrollBy`. Redeploy Pages **and** refresh the bridge script on Squarespace (CDN/cache) so both sides stay in sync.
+
 ### Content contract
 
 ```js

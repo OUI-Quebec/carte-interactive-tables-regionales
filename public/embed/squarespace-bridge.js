@@ -25,6 +25,76 @@
   var MSG_RESIZE = 'quebec-map:resize';
   var MSG_SCROLL = 'quebec-map:scrollBy';
 
+  /**
+   * Scroll the page behind the iframe. Squarespace often does not move via
+   * window.scrollBy alone — walk overflow ancestors of the iframe first.
+   */
+  function scrollPageBy(iframe, dy) {
+    var amount = Number(dy);
+    if (!isFinite(amount) || amount === 0) return;
+
+    function tryOverflowScroll(node) {
+      if (
+        !node ||
+        node === global.document.body ||
+        node === global.document.documentElement
+      ) {
+        return false;
+      }
+      var style = global.getComputedStyle(node);
+      var oy = style.overflowY;
+      if (oy !== 'auto' && oy !== 'scroll' && oy !== 'overlay') return false;
+      if (node.scrollHeight <= node.clientHeight + 1) return false;
+      var prev = node.scrollTop;
+      node.scrollTop = prev + amount;
+      return node.scrollTop !== prev;
+    }
+
+    var node = iframe && iframe.parentElement;
+    while (node && node !== global.document.documentElement) {
+      if (tryOverflowScroll(node)) return;
+      node = node.parentElement;
+    }
+
+    var root =
+      global.document.scrollingElement || global.document.documentElement;
+    var before =
+      global.pageYOffset ||
+      (root && root.scrollTop) ||
+      (global.document.body && global.document.body.scrollTop) ||
+      0;
+
+    if (root) root.scrollTop = before + amount;
+    if (global.document.body && global.document.body !== root) {
+      global.document.body.scrollTop = before + amount;
+    }
+    global.scrollBy(0, amount);
+
+    // Last resort: some Squarespace skins scroll #siteWrapper / .App.
+    var fallbacks = [
+      global.document.getElementById('siteWrapper'),
+      global.document.querySelector('.App'),
+      global.document.querySelector('#page')
+    ];
+    var after =
+      global.pageYOffset ||
+      (root && root.scrollTop) ||
+      (global.document.body && global.document.body.scrollTop) ||
+      0;
+    if (after === before) {
+      for (var i = 0; i < fallbacks.length; i++) {
+        if (tryOverflowScroll(fallbacks[i])) return;
+        // Also try even without overflow:auto (siteWrapper quirks).
+        var fb = fallbacks[i];
+        if (fb && fb.scrollHeight > fb.clientHeight + 1) {
+          var p = fb.scrollTop;
+          fb.scrollTop = p + amount;
+          if (fb.scrollTop !== p) return;
+        }
+      }
+    }
+  }
+
   var REGIONS = [
     { id: '01', name: 'Bas-Saint-Laurent', shortName: 'Bas-Saint-Laurent' },
     { id: '02', name: 'Saguenay–Lac-Saint-Jean', shortName: 'Saguenay–Lac-Saint-Jean' },
@@ -270,11 +340,7 @@
         return;
       }
       if (data.type === MSG_SCROLL && data.dy != null) {
-        // Mobile: iframe chrome / publications forwarded a vertical swipe.
-        var dy = Number(data.dy);
-        if (isFinite(dy) && dy !== 0) {
-          global.scrollBy(0, dy);
-        }
+        scrollPageBy(iframe, data.dy);
       }
     }
 
