@@ -62,6 +62,12 @@ export function mountQuebecRegionsMap(el, config) {
   let mtlInsetLabelLayout = [];
   /** ViewBox size used by the current inset (for label projection). */
   let mtlInsetVb = { w: 250, h: 200 };
+  /**
+   * Inset shape anchors in SVG viewBox units (centroid + bbox) for Laval /
+   * Montréal — used so the contact bubble points at the expanded inset.
+   * @type {Map<string, { x: number, y: number, minX: number, minY: number, maxX: number, maxY: number }>}
+   */
+  const mtlInsetAnchors = new Map();
   /** Currently selected administrative region (`01`…`17`), or null. */
   let selectedId = null;
   /** @type {L.LayerGroup | null} */
@@ -173,17 +179,19 @@ export function mountQuebecRegionsMap(el, config) {
    */
   const MAP_LABEL_OFFSETS = {
     '02': { x: 0, y: 0 },
-    '08': { x: -15, y: -50 },
+    '08': { x: 0, y: 0 },
     '09': { x: 0, y: 0 },
     '10': { x: -50, y: 0 }
   };
   /**
    * Scale-independent nudges as a fraction of the region latLng bounds
-   * (x → east, y → south). Used for Saguenay / Côte-Nord so placement
-   * holds when the iframe is short or full-page.
+   * (x → east, y → south). Holds when the iframe is short or full-page.
    */
   const MAP_LABEL_BOUNDS_FRAC = {
-    '02': { x: 0, y: 0.08 },
+    // A bit left + lower than the bounds center
+    '02': { x: -0.1, y: 0.2 },
+    // ~3 line-heights lower than center (was sitting too high)
+    '08': { x: -0.04, y: 0.28 },
     '09': { x: 0.06, y: 0.12 }
   };
 
@@ -388,16 +396,20 @@ export function mountQuebecRegionsMap(el, config) {
   /**
    * Comic-style contact card: prefer top-right of the region, with a black
    * triangle tail from a card corner (base on two adjacent edges) to center.
+   * @param {L.LatLng} target
+   * @param {{ regionId?: string }} [opts]
    */
-  function computeContactCardLayout(target) {
+  function computeContactCardLayout(target, opts = {}) {
     // Match .qc-person-bubble (248px + border-box); height ≈ banner + body.
     const BUBBLE_W = 248;
     const BUBBLE_H = 120;
     // Pull bases into the card so the black fill fuses with the 3px border.
     const INSET = 5;
     const size = map.getSize();
-    const terr = regionLayer?.getBounds();
     const tPt = map.latLngToContainerPoint(target);
+    const regionId = opts.regionId ? padId(opts.regionId) : null;
+    const insetAnchor = regionId ? mtlInsetAnchors.get(regionId) : null;
+    const useInset = Boolean(insetAnchor && ui.showMontrealInset !== false);
 
     let terrBox = {
       minX: tPt.x - 80,
@@ -405,19 +417,41 @@ export function mountQuebecRegionsMap(el, config) {
       minY: tPt.y - 80,
       maxY: tPt.y + 80
     };
-    if (terr?.isValid()) {
+
+    if (useInset && insetAnchor) {
+      // Territory = the expanded Laval/Montréal shape inside the inset frame.
       const corners = [
-        terr.getNorthWest(),
-        terr.getNorthEast(),
-        terr.getSouthWest(),
-        terr.getSouthEast()
-      ].map((ll) => map.latLngToContainerPoint(ll));
-      terrBox = {
-        minX: Math.min(...corners.map((p) => p.x)),
-        maxX: Math.max(...corners.map((p) => p.x)),
-        minY: Math.min(...corners.map((p) => p.y)),
-        maxY: Math.max(...corners.map((p) => p.y))
-      };
+        insetViewBoxToLatLng(insetAnchor.minX, insetAnchor.minY),
+        insetViewBoxToLatLng(insetAnchor.maxX, insetAnchor.minY),
+        insetViewBoxToLatLng(insetAnchor.minX, insetAnchor.maxY),
+        insetViewBoxToLatLng(insetAnchor.maxX, insetAnchor.maxY)
+      ]
+        .filter(Boolean)
+        .map((ll) => map.latLngToContainerPoint(ll));
+      if (corners.length) {
+        terrBox = {
+          minX: Math.min(...corners.map((p) => p.x)),
+          maxX: Math.max(...corners.map((p) => p.x)),
+          minY: Math.min(...corners.map((p) => p.y)),
+          maxY: Math.max(...corners.map((p) => p.y))
+        };
+      }
+    } else {
+      const terr = regionLayer?.getBounds();
+      if (terr?.isValid()) {
+        const corners = [
+          terr.getNorthWest(),
+          terr.getNorthEast(),
+          terr.getSouthWest(),
+          terr.getSouthEast()
+        ].map((ll) => map.latLngToContainerPoint(ll));
+        terrBox = {
+          minX: Math.min(...corners.map((p) => p.x)),
+          maxX: Math.max(...corners.map((p) => p.x)),
+          minY: Math.min(...corners.map((p) => p.y)),
+          maxY: Math.max(...corners.map((p) => p.y))
+        };
+      }
     }
 
     const pubsOpen = Boolean(pubsPane?.classList.contains('is-open'));
@@ -444,44 +478,79 @@ export function mountQuebecRegionsMap(el, config) {
 
     // Prefer top-right of the region (comic bubble). `corner` = where the
     // tail leaves the card (bl = bottom-left, etc.).
-    const candidates = [
-      {
-        corner: 'bl',
-        prefer: 6,
-        x: tPt.x + ox * 0.55,
-        y: tPt.y - BUBBLE_H - oy * 0.45
-      },
-      {
-        corner: 'bl',
-        prefer: 5,
-        x: Math.max(tPt.x + ox * 0.35, terrBox.maxX - BUBBLE_W * 0.25),
-        y: Math.min(tPt.y, terrBox.minY) - BUBBLE_H - oy * 0.25
-      },
-      {
-        corner: 'bl',
-        prefer: 4,
-        x: terrBox.maxX + ox * 0.2,
-        y: tPt.y - BUBBLE_H * 0.75
-      },
-      {
-        corner: 'br',
-        prefer: 3,
-        x: tPt.x - BUBBLE_W - ox * 0.55,
-        y: tPt.y - BUBBLE_H - oy * 0.45
-      },
-      {
-        corner: 'tl',
-        prefer: 2,
-        x: tPt.x + ox * 0.55,
-        y: tPt.y + oy * 0.55
-      },
-      {
-        corner: 'tr',
-        prefer: 1,
-        x: tPt.x - BUBBLE_W - ox * 0.55,
-        y: tPt.y + oy * 0.55
-      }
-    ];
+    // When pointing at the Montréal inset (usually bottom-right), prefer
+    // placements to the left of the shape so the card sits over open map.
+    const candidates = useInset
+      ? [
+          {
+            corner: 'br',
+            prefer: 6,
+            x: tPt.x - BUBBLE_W - ox * 0.35,
+            y: tPt.y - BUBBLE_H - oy * 0.25
+          },
+          {
+            corner: 'br',
+            prefer: 5,
+            x: Math.min(tPt.x, terrBox.minX) - BUBBLE_W - ox * 0.15,
+            y: tPt.y - BUBBLE_H * 0.65
+          },
+          {
+            corner: 'tr',
+            prefer: 4,
+            x: tPt.x - BUBBLE_W - ox * 0.35,
+            y: tPt.y + oy * 0.35
+          },
+          {
+            corner: 'bl',
+            prefer: 3,
+            x: tPt.x + ox * 0.35,
+            y: tPt.y - BUBBLE_H - oy * 0.35
+          },
+          {
+            corner: 'tl',
+            prefer: 2,
+            x: tPt.x + ox * 0.35,
+            y: tPt.y + oy * 0.35
+          }
+        ]
+      : [
+          {
+            corner: 'bl',
+            prefer: 6,
+            x: tPt.x + ox * 0.55,
+            y: tPt.y - BUBBLE_H - oy * 0.45
+          },
+          {
+            corner: 'bl',
+            prefer: 5,
+            x: Math.max(tPt.x + ox * 0.35, terrBox.maxX - BUBBLE_W * 0.25),
+            y: Math.min(tPt.y, terrBox.minY) - BUBBLE_H - oy * 0.25
+          },
+          {
+            corner: 'bl',
+            prefer: 4,
+            x: terrBox.maxX + ox * 0.2,
+            y: tPt.y - BUBBLE_H * 0.75
+          },
+          {
+            corner: 'br',
+            prefer: 3,
+            x: tPt.x - BUBBLE_W - ox * 0.55,
+            y: tPt.y - BUBBLE_H - oy * 0.45
+          },
+          {
+            corner: 'tl',
+            prefer: 2,
+            x: tPt.x + ox * 0.55,
+            y: tPt.y + oy * 0.55
+          },
+          {
+            corner: 'tr',
+            prefer: 1,
+            x: tPt.x - BUBBLE_W - ox * 0.55,
+            y: tPt.y + oy * 0.55
+          }
+        ];
 
     const overlapsLegend = (c) => c.x < legendRight && c.y < legendBottom;
 
@@ -494,8 +563,10 @@ export function mountQuebecRegionsMap(el, config) {
 
     let best =
       candidates.filter(fits).sort((a, b) => b.prefer - a.prefer)[0] || {
-        corner: 'bl',
-        x: Math.max(padL, tPt.x + ox * 0.4),
+        corner: useInset ? 'br' : 'bl',
+        x: useInset
+          ? Math.max(padL, tPt.x - BUBBLE_W - ox * 0.3)
+          : Math.max(padL, tPt.x + ox * 0.4),
         y: Math.max(padT, tPt.y - BUBBLE_H - oy * 0.3),
         prefer: 0
       };
@@ -575,11 +646,14 @@ export function mountQuebecRegionsMap(el, config) {
   function showPersonBubble(id, layer) {
     clearPersonBubble();
     ensureContactStemPane();
-    const cfg = regionById.get(id);
-    const regionName = cfg?.shortName || cfg?.name || id;
-    const contact = cmsContent.contacts[padId(id)] ?? null;
-    const target = layer.getBounds().getCenter();
-    personBubbleAnchor = { id, target };
+    const rid = padId(id);
+    const cfg = regionById.get(rid);
+    const regionName = cfg?.shortName || cfg?.name || rid;
+    const contact = cmsContent.contacts[rid] ?? null;
+    // Prefer the expanded inset shape for Laval / Montréal when available.
+    const insetTarget = personBubbleTargetFromInset(rid);
+    const target = insetTarget || layer.getBounds().getCenter();
+    personBubbleAnchor = { id: rid, target };
 
     const fullName = contact?.fullName?.trim() || 'Nom Prénom';
     const role = contact?.title?.trim() || 'Titre / rôle';
@@ -591,7 +665,7 @@ export function mountQuebecRegionsMap(el, config) {
       ? `<div class="qc-person-bubble__cms">${bodyHtml}</div>`
       : `<div class="qc-person-bubble__note">Informations à venir</div>`;
 
-    const layoutCard = computeContactCardLayout(target);
+    const layoutCard = computeContactCardLayout(target, { regionId: rid });
     const html = `
       <div class="qc-person-bubble${bodyHtml ? ' qc-person-bubble--rich' : ''}" role="dialog" aria-label="Contact — ${escapeAttr(regionName)}">
         <div class="qc-person-bubble__banner">
@@ -638,6 +712,14 @@ export function mountQuebecRegionsMap(el, config) {
     );
 
     personBubbleGroup = L.layerGroup([triangle, marker]).addTo(map);
+  }
+
+  /** Map lat/lng of a Laval/Montréal centroid inside the inset frame. */
+  function personBubbleTargetFromInset(id) {
+    if (ui.showMontrealInset === false) return null;
+    const anchor = mtlInsetAnchors.get(padId(id));
+    if (!anchor) return null;
+    return insetViewBoxToLatLng(anchor.x, anchor.y);
   }
 
   function updatePersonBubble() {
@@ -908,6 +990,7 @@ export function mountQuebecRegionsMap(el, config) {
     }
     mtlInsetLabelMarkers.clear();
     mtlInsetLabelLayout = [];
+    mtlInsetAnchors.clear();
     clearPersonBubble();
     hoverId = null;
     regionLayersById.clear();
@@ -1116,6 +1199,7 @@ export function mountQuebecRegionsMap(el, config) {
     // HTML labels (not SVG <text>) so Laval / Montréal share the same font as
     // the main map region labels — SVG text was falling back inconsistently.
     mtlInsetVb = { w: vbW, h: vbH };
+    mtlInsetAnchors.clear();
     mtlInsetLabelLayout = features.map((f) => {
       const id = padId(f.properties?.id ?? f.properties?.RES_CO_REG);
       const name = id === '06' ? 'Montréal' : id === '13' ? 'Laval' : id;
@@ -1125,6 +1209,28 @@ export function mountQuebecRegionsMap(el, config) {
       // Optical nudges (x right, y down) — keep labels inside their shapes.
       const labelOff =
         id === '13' ? { x: -8, y: 0 } : id === '06' ? { x: -15, y: 0 } : { x: 0, y: 0 };
+
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      mapGeomCoords(f.geometry, (lon, lat) => {
+        const [px, py] = project(lon, lat);
+        if (px < minX) minX = px;
+        if (py < minY) minY = py;
+        if (px > maxX) maxX = px;
+        if (py > maxY) maxY = py;
+      });
+      // Bubble tip sits on the inset shape (slight Montréal nudge into pink).
+      mtlInsetAnchors.set(id, {
+        x,
+        y: id === '06' ? y + 8 : y,
+        minX: Number.isFinite(minX) ? minX : x - 20,
+        minY: Number.isFinite(minY) ? minY : y - 20,
+        maxX: Number.isFinite(maxX) ? maxX : x + 20,
+        maxY: Number.isFinite(maxY) ? maxY : y + 20
+      });
+
       return { id, x, y: yLabel, name, off: labelOff };
     });
 
@@ -1633,7 +1739,13 @@ export function mountQuebecRegionsMap(el, config) {
   }
   if (pubsPane) {
     L.DomEvent.disableClickPropagation(pubsPane);
-    L.DomEvent.disableScrollPropagation(pubsPane);
+    // Desktop: keep wheel over the floating panel from zooming the map.
+    // Mobile: do NOT trap scroll — publications sit below the map and must
+    // let the page / parent iframe scroll.
+    const onPubsWheel = (e) => {
+      if (!isMobileViewport()) e.stopPropagation();
+    };
+    pubsPane.addEventListener('wheel', onPubsWheel, { passive: true });
   }
 
   /** Bottom-right quantity slider ↔ map zoom. */

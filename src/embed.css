@@ -584,6 +584,9 @@ body {
     overflow: visible;
     height: auto;
     min-height: 100%;
+    /* Allow touch-scroll to chain to the Squarespace parent when the
+       iframe is already sized to its content (nothing left to scroll inside). */
+    overscroll-behavior: auto;
   }
 
   html,
@@ -591,17 +594,20 @@ body {
   #root {
     height: auto;
     min-height: 100%;
+    touch-action: pan-y;
   }
 
   .qc-map-root {
     height: auto;
     min-height: 100%;
+    touch-action: pan-y;
   }
 
   .qc-map-body {
     flex: none;
     flex-direction: column;
     overflow: visible;
+    touch-action: pan-y;
   }
 
   .qc-map-stage {
@@ -610,6 +616,13 @@ body {
     height: min(100vw, 560px);
     min-height: 320px;
     overflow: hidden;
+    /* Map pan/pinch stay on the map; don't chain those gestures up. */
+    overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+
+  .qc-map-stage .leaflet-container {
+    touch-action: manipulation;
   }
 
   .qc-map-bubble--legend {
@@ -634,16 +647,20 @@ body {
     overflow: visible;
     display: none;
     pointer-events: none;
+    touch-action: pan-y;
+    overscroll-behavior: auto;
   }
 
   .qc-map-pubs-drawer.is-open {
     display: block;
     transform: none;
     pointer-events: auto;
+    touch-action: pan-y;
   }
 
   .qc-map-pubs {
     padding: 1rem 0.85rem 1.25rem;
+    touch-action: pan-y;
   }
 }
 
