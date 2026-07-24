@@ -53,6 +53,15 @@ export function mountQuebecRegionsMap(el, config) {
   let mtlInsetOverlay = null;
   /** @type {L.LayerGroup | null} */
   let mtlLeaderLayer = null;
+  /** HTML labels for Laval / Montréal inside the inset (same font as map labels). */
+  /** @type {L.LayerGroup | null} */
+  let mtlInsetLabelLayer = null;
+  /** @type {Map<string, L.Marker>} */
+  const mtlInsetLabelMarkers = new Map();
+  /** @type {{ id: string, x: number, y: number, name: string, off?: { x: number, y: number } }[]} */
+  let mtlInsetLabelLayout = [];
+  /** ViewBox size used by the current inset (for label projection). */
+  let mtlInsetVb = { w: 250, h: 200 };
   /** Currently selected administrative region (`01`…`17`), or null. */
   let selectedId = null;
   /** @type {L.LayerGroup | null} */
@@ -78,24 +87,177 @@ export function mountQuebecRegionsMap(el, config) {
   const quantityRange = el.querySelector('[data-quantity-range]');
 
   /** Fraction of the map container the regions should fill at max zoom-out. */
-  const fitFill = Math.min(0.95, Math.max(0.5, view.fitFill ?? 0.8));
+  const fitFillConfigured = Math.min(1, Math.max(0.5, view.fitFill ?? 0.98));
+  /** Mobile keeps a little breathing room so pinch-zoom feels useful. */
+  const fitFillMobile = Math.min(0.92, Math.max(0.5, view.fitFillMobile ?? 0.85));
+
+  const mobileMq =
+    typeof matchMedia === 'function'
+      ? matchMedia('(max-width: 720px)')
+      : { matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} };
+
+  function isMobileViewport() {
+    return Boolean(mobileMq.matches);
+  }
+
+  function currentFitFill() {
+    return isMobileViewport() ? fitFillMobile : fitFillConfigured;
+  }
 
   const map = L.map(canvas, {
     center: view.center ?? [53.2, -71.5],
     zoom: view.zoom ?? 5,
     minZoom: view.minZoom ?? 4,
     maxZoom: view.maxZoom ?? 10,
-    // Fractional zoom so the slider / wheel aren't stuck on ~5 integer steps.
+    // Fractional zoom so pinch on mobile isn't stuck on integer steps.
     zoomSnap: view.zoomSnap ?? 0,
     zoomDelta: view.zoomDelta ?? 0.25,
     wheelPxPerZoomLevel: view.wheelPxPerZoomLevel ?? 100,
     zoomControl: false,
-    attributionControl: false
+    attributionControl: false,
+    // Desktop starts locked; applyZoomMode() enables pinch/pan on mobile.
+    scrollWheelZoom: false,
+    doubleClickZoom: false,
+    boxZoom: false,
+    touchZoom: true,
+    dragging: false
   });
+
+  /** Enable pinch zoom + pan on mobile only; lock camera on desktop. */
+  function applyZoomMode() {
+    const mobile = isMobileViewport();
+    if (mobile) {
+      map.touchZoom.enable();
+      map.dragging.enable();
+      map.doubleClickZoom.disable();
+      map.scrollWheelZoom.disable();
+      map.boxZoom.disable();
+    } else {
+      map.touchZoom.disable();
+      map.dragging.disable();
+      map.doubleClickZoom.disable();
+      map.scrollWheelZoom.disable();
+      map.boxZoom.disable();
+    }
+  }
+
+  /** Tell the Squarespace parent to stretch the iframe when content grows. */
+  function notifyHostHeight() {
+    if (destroyed) return;
+    // Desktop pubs overlay the map — only mobile needs parent resize.
+    if (!isMobileViewport()) return;
+    if (typeof window === 'undefined' || window.parent === window) return;
+    window.clearTimeout(heightNotifyTimer);
+    heightNotifyTimer = window.setTimeout(() => {
+      if (destroyed || !isMobileViewport()) return;
+      // Measure the map root only — document scrollHeight is inflated by
+      // min-height:100% to the current iframe viewport and won't shrink.
+      const height = Math.max(320, Math.ceil(el.getBoundingClientRect().height));
+      if (Math.abs(height - lastPostedHeight) < 2) return;
+      lastPostedHeight = height;
+      window.parent.postMessage({ type: 'quebec-map:resize', height }, '*');
+    }, 50);
+  }
+
+  /** On-map name labels for large peripheral regions (from maps-test). */
+  const MAP_LABELS = {
+    '02': 'Saguenay',
+    '08': 'Abitibi',
+    '09': 'Côte-Nord',
+    '10': 'Nord-du-Québec'
+  };
+  /** Optical pixel nudges from centroid (x right, y down). */
+  const MAP_LABEL_OFFSETS = {
+    '02': { x: 0, y: 45 },
+    '08': { x: -15, y: -50 },
+    '09': { x: 0, y: 100 },
+    '10': { x: -50, y: 0 }
+  };
+
+  /**
+   * Mobile chrome: hide legend; all regions get labels on mobile.
+   * Desktop keeps the legend + the four peripheral MAP_LABELS.
+   */
+  function syncMobileChrome() {
+    const mobile = isMobileViewport();
+    el.classList.toggle('qc-map-root--mobile', mobile);
+    const legendEl = el.querySelector('[data-legend-bubble]');
+    if (legendEl) {
+      legendEl.hidden = mobile;
+    }
+    syncRegionLabels();
+    notifyHostHeight();
+  }
+
+  /** Inline transform so the first paint is already centered (avoids bottom-right flash). */
+  function regionLabelHtml(text, off = { x: 0, y: 0 }, extraClass = '') {
+    const x = Number(off.x) || 0;
+    const y = Number(off.y) || 0;
+    const cls = extraClass
+      ? `qc-region-label ${extraClass}`
+      : 'qc-region-label';
+    return `<span class="${cls}" style="transform:translate(calc(-50% + ${x}px),calc(-50% + ${y}px))">${escapeHtml(text)}</span>`;
+  }
+
+  function regionLabelIcon(text, off, extraClass) {
+    return L.divIcon({
+      className: 'qc-region-label-wrap leaflet-div-icon',
+      html: regionLabelHtml(text, off, extraClass),
+      iconSize: [0, 0],
+      iconAnchor: [0, 0]
+    });
+  }
+
+  /** Place region names on polygons (maps-test sizing + offsets for key regions). */
+  function syncRegionLabels() {
+    if (regionLabelGroup) {
+      map.removeLayer(regionLabelGroup);
+      regionLabelGroup = null;
+    }
+    if (regionLayersById.size === 0) return;
+
+    const mobile = isMobileViewport();
+    const skipInsetIds =
+      ui.showMontrealInset === false ? new Set() : new Set(['06', '13']);
+
+    regionLabelGroup = L.layerGroup();
+    regionLayersById.forEach((layer, id) => {
+      if (skipInsetIds.has(id)) return;
+      const mapped = MAP_LABELS[id];
+      if (!mobile && !mapped) return;
+      const cfg = regionById.get(id);
+      const label = mapped || cfg?.shortName || cfg?.name || id;
+      if (!label) return;
+
+      let lat;
+      let lon;
+      if (layer.feature) {
+        [lon, lat] = featureCentroidLonLat(layer.feature);
+      } else {
+        const bounds = layer.getBounds?.();
+        if (!bounds?.isValid()) return;
+        const c = bounds.getCenter();
+        lat = c.lat;
+        lon = c.lng;
+      }
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+      const off = MAP_LABEL_OFFSETS[id] ?? { x: 0, y: 0 };
+      const marker = L.marker([lat, lon], {
+        interactive: false,
+        keyboard: false,
+        zIndexOffset: 400,
+        icon: regionLabelIcon(label, off)
+      });
+      regionLabelGroup.addLayer(marker);
+    });
+    regionLabelGroup.addTo(map);
+  }
 
   /**
    * Lock min zoom (and soft maxBounds) so fully zoomed-out regions
    * fill ~fitFill of the container — not a tiny island in empty space.
+   * On desktop, also lock maxZoom to the fit level (no zoom UI).
    */
   function clampCameraToRegions(bounds, { fit = false } = {}) {
     if (!bounds?.isValid()) return;
@@ -103,29 +265,43 @@ export function mountQuebecRegionsMap(el, config) {
     const size = map.getSize();
     if (!size.x || !size.y) return;
 
-    const padX = Math.max(8, size.x * (1 - fitFill) / 2);
-    const padY = Math.max(8, size.y * (1 - fitFill) / 2);
+    const fill = currentFitFill();
+    const padX = Math.max(4, size.x * (1 - fill) / 2);
+    const padY = Math.max(4, size.y * (1 - fill) / 2);
     const padding = L.point(padX, padY);
 
     let z = map.getBoundsZoom(bounds, false, padding);
     if (!Number.isFinite(z)) return;
-    z = Math.min(z, view.maxZoom ?? 10);
+    const configuredMax = view.maxZoom ?? 10;
+    z = Math.min(z, configuredMax);
     if (view.minZoom != null) z = Math.max(z, view.minZoom);
 
     map.setMinZoom(z);
 
+    const mobile = isMobileViewport();
+    if (mobile) {
+      map.setMaxZoom(configuredMax);
+    } else {
+      // Desktop: regions fill the pane; no zoom in/out.
+      map.setMaxZoom(z);
+    }
+
     // Allow a little pan slack, but keep the cutout framed.
-    const slack = bounds.pad(Math.max(0.08, (1 - fitFill) * 0.75));
+    const slack = bounds.pad(Math.max(0.04, (1 - fill) * 0.75));
     map.setMaxBounds(slack);
     map.options.maxBoundsViscosity = view.maxBoundsViscosity ?? 1;
+
+    applyZoomMode();
 
     if (fit) {
       map.fitBounds(bounds, {
         padding: [padY, padX],
-        maxZoom: view.maxZoom ?? 10,
+        maxZoom: mobile ? configuredMax : z,
         animate: false
       });
     } else if (map.getZoom() < z) {
+      map.setZoom(z, { animate: false });
+    } else if (!mobile && map.getZoom() > z) {
       map.setZoom(z, { animate: false });
     }
     syncQuantityFromMap();
@@ -135,6 +311,10 @@ export function mountQuebecRegionsMap(el, config) {
   let geoCollection = null;
   let regionLayer = null;
   let destroyed = false;
+  /** @type {L.LayerGroup | null} */
+  let regionLabelGroup = null;
+  let lastPostedHeight = 0;
+  let heightNotifyTimer = 0;
 
   function setStatus(text, isError = false) {
     if (!statusEl) return;
@@ -225,9 +405,13 @@ export function mountQuebecRegionsMap(el, config) {
     }
 
     const padL = legendRight;
-    const padR = (pubsOpen ? Math.min(320, size.x * 0.88) : 0) + 16;
+    // Floating pubs panel (desktop only): inset 16px from right, ~300px wide (+ gap).
+    // On mobile, publications sit below the map — no side padding.
+    const pubsW = Math.min(300, Math.max(0, size.x - 32));
+    const padR =
+      (pubsOpen && !isMobileViewport() ? pubsW + 16 : 0) + 16;
     const padT = 16;
-    const padB = 72;
+    const padB = 16;
     const ox = Math.max(56, Math.min(130, size.x * 0.07));
     const oy = Math.max(36, Math.min(110, size.y * 0.09));
 
@@ -461,6 +645,7 @@ export function mountQuebecRegionsMap(el, config) {
     }
     if (!open || !selectedId) {
       updatePersonBubble();
+      notifyHostHeight();
       return;
     }
 
@@ -503,6 +688,7 @@ export function mountQuebecRegionsMap(el, config) {
     }
     // Drawer open/close changes available space for the contact card.
     updatePersonBubble();
+    notifyHostHeight();
   }
 
   function refreshRegionStyles(hoverId = null) {
@@ -689,6 +875,12 @@ export function mountQuebecRegionsMap(el, config) {
       map.removeLayer(mtlLeaderLayer);
       mtlLeaderLayer = null;
     }
+    if (mtlInsetLabelLayer) {
+      map.removeLayer(mtlInsetLabelLayer);
+      mtlInsetLabelLayer = null;
+    }
+    mtlInsetLabelMarkers.clear();
+    mtlInsetLabelLayout = [];
     clearPersonBubble();
     hoverId = null;
     regionLayersById.clear();
@@ -711,13 +903,14 @@ export function mountQuebecRegionsMap(el, config) {
     }).addTo(map);
 
     applyRegionZOrder();
-    // Region names live in the Légende; only the Montréal inset keeps its own labels.
 
     map.invalidateSize();
     const bounds = regionLayer.getBounds();
     if (bounds.isValid()) {
       clampCameraToRegions(bounds, { fit: true });
     }
+    // Labels after camera settle — avoids a first frame at the wrong zoom.
+    syncMobileChrome();
     requestAnimationFrame(() => map.invalidateSize());
     renderMontrealInset(collection);
     syncMontrealZoomUi();
@@ -738,17 +931,20 @@ export function mountQuebecRegionsMap(el, config) {
 
   /**
    * Montréal inset — tweak these only (position ≠ size).
-   *   offsetLat  up (+) / down (-)
-   *   offsetLng  right/east (+) / left/west (-)
-   *   halfLng    overall size (height follows the SVG aspect ratio)
+   *   offsetLat     up (+) / down (-)
+   *   offsetLng     right/east (+) / left/west (-)
+   *   halfLng       east half-width (west side grows via leftExtend)
+   *   leftExtend    grow total width westward (0.25 ≈ +25%)
    */
   const MTL_INSET = {
     offsetLat: 1.35,
     offsetLng: 4.5,
     // ~15% larger than the previous 1.4; grows around the same anchor.
-    halfLng: 1.61
+    halfLng: 1.61,
+    leftExtend: 0.25
   };
-  const MTL_INSET_VB = { w: 200, h: 230 };
+  // Landscape rectangle (was ~square 200×230).
+  const MTL_INSET_VB = { w: 250, h: 200 };
 
   function insetAnchorLatLng() {
     const estrie = regionLayersById.get('05')?.getBounds();
@@ -772,25 +968,32 @@ export function mountQuebecRegionsMap(el, config) {
   }
 
   /**
-   * Geographic footprint matching the SVG viewBox aspect in screen space,
-   * so the frame is not stretched tall/wide.
+   * Geographic footprint matching the SVG viewBox aspect in screen space.
+   * East edge stays put; width grows left via leftExtend so leaders stay on
+   * the (new) west corners.
    */
   function insetMapBounds() {
     const anchor = insetAnchorLatLng();
     const halfLng = MTL_INSET.halfLng;
+    const leftExtend = Math.max(0, MTL_INSET.leftExtend ?? 0);
     const c = map.project(anchor, map.getZoom());
     const west = map.project(
       L.latLng(anchor.lat, anchor.lng - halfLng),
       map.getZoom()
     );
     const halfWpx = Math.max(1, Math.abs(c.x - west.x));
-    const halfHpx = halfWpx * (MTL_INSET_VB.h / MTL_INSET_VB.w);
+    const fullWpx = 2 * halfWpx * (1 + leftExtend);
+    // Keep the east edge; push the west edge further left.
+    const rightX = c.x + halfWpx;
+    const leftX = rightX - fullWpx;
+    const fullHpx = fullWpx * (MTL_INSET_VB.h / MTL_INSET_VB.w);
+    const halfHpx = fullHpx / 2;
     const sw = map.unproject(
-      L.point(c.x - halfWpx, c.y + halfHpx),
+      L.point(leftX, c.y + halfHpx),
       map.getZoom()
     );
     const ne = map.unproject(
-      L.point(c.x + halfWpx, c.y - halfHpx),
+      L.point(rightX, c.y - halfHpx),
       map.getZoom()
     );
     return L.latLngBounds(sw, ne);
@@ -823,7 +1026,7 @@ export function mountQuebecRegionsMap(el, config) {
       });
     }
 
-    const pad = Math.max(maxX - minX, maxY - minY) * 0.035 || 0.008;
+    const pad = Math.max(maxX - minX, maxY - minY) * 0.012 || 0.004;
     minX -= pad;
     maxX += pad;
     minY -= pad;
@@ -832,11 +1035,12 @@ export function mountQuebecRegionsMap(el, config) {
     const h = maxY - minY || 1;
     const vbW = MTL_INSET_VB.w;
     const vbH = MTL_INSET_VB.h;
-    const mapTop = 34; // banner strip in viewBox units
-    const edge = 4; // tight inset so shapes sit near the frame
+    // Banner strip + title sizing matched to maps-test (20px title).
+    const mapTop = 34;
+    const edge = 4;
     const mapH = vbH - mapTop - edge;
     const mapW = vbW - edge * 2;
-    const scale = Math.min(mapW / w, mapH / h);
+    const scale = Math.min(mapW / w, mapH / h) * 0.98;
     const ox = edge + (mapW - w * scale) / 2;
     const oy = mapTop + (mapH - h * scale) / 2;
 
@@ -869,7 +1073,7 @@ export function mountQuebecRegionsMap(el, config) {
       return '';
     }
 
-    const strokeW = 2.4;
+    const strokeW = 2.6;
     const paths = features
       .map((f) => {
         const id = padId(f.properties?.id ?? f.properties?.RES_CO_REG);
@@ -882,24 +1086,27 @@ export function mountQuebecRegionsMap(el, config) {
       })
       .join('');
 
-    const labels = features
-      .map((f) => {
-        const id = padId(f.properties?.id ?? f.properties?.RES_CO_REG);
-        const name = id === '06' ? 'Montréal' : id === '13' ? 'Laval' : id;
-        const [cx, cy] = featureCentroidLonLat(f);
-        const [x, y] = project(cx, cy);
-        // Nudge Montréal down so it sits in the pink area, not on the Laval border.
-        const yLabel = id === '06' ? y + 12 : y;
-        return `<text x="${x.toFixed(1)}" y="${yLabel.toFixed(1)}" text-anchor="middle" dominant-baseline="middle" class="qc-mtl-inset__label" pointer-events="none">${escapeHtml(name)}</text>`;
-      })
-      .join('');
+    // HTML labels (not SVG <text>) so Laval / Montréal share the same font as
+    // the main map region labels — SVG text was falling back inconsistently.
+    mtlInsetVb = { w: vbW, h: vbH };
+    mtlInsetLabelLayout = features.map((f) => {
+      const id = padId(f.properties?.id ?? f.properties?.RES_CO_REG);
+      const name = id === '06' ? 'Montréal' : id === '13' ? 'Laval' : id;
+      const [cx, cy] = featureCentroidLonLat(f);
+      const [x, y] = project(cx, cy);
+      const yLabel = id === '06' ? y + 12 : y;
+      // Optical nudges (x right, y down) — keep labels inside their shapes.
+      const labelOff =
+        id === '13' ? { x: -8, y: 0 } : id === '06' ? { x: -15, y: 0 } : { x: 0, y: 0 };
+      return { id, x, y: yLabel, name, off: labelOff };
+    });
 
     const svgInner = `
       <rect x="0" y="0" width="${vbW}" height="${vbH}" fill="#0a0a0a" pointer-events="none"/>
       <rect x="3" y="3" width="${vbW - 6}" height="${vbH - 6}" fill="#0a0a0a" stroke="#0a0a0a" stroke-width="2" pointer-events="none"/>
-      <text x="${vbW / 2}" y="16" text-anchor="middle" class="qc-mtl-inset__banner-svg" pointer-events="none"><tspan class="qc-mtl-inset__banner-muted">Région de </tspan><tspan>Montréal</tspan></text>
+      <text x="${vbW / 2}" y="${(mapTop - 2) / 2}" text-anchor="middle" dominant-baseline="middle" font-family="Roboto, Arial, sans-serif" font-size="20" font-weight="700" class="qc-mtl-inset__banner-svg" style="font-family:Roboto,Arial,sans-serif;font-size:20px;font-weight:700" pointer-events="none"><tspan class="qc-mtl-inset__banner-muted" font-family="Roboto, Arial, sans-serif" font-size="20" style="font-family:Roboto,Arial,sans-serif;font-size:20px">Région de </tspan><tspan font-family="Roboto, Arial, sans-serif" font-size="20" style="font-family:Roboto,Arial,sans-serif;font-size:20px">Montréal</tspan></text>
       <rect x="${edge}" y="${mapTop - 2}" width="${vbW - edge * 2}" height="${vbH - mapTop - edge + 2}" fill="#eef8fa" pointer-events="none"/>
-      ${paths}${labels}
+      ${paths}
     `;
 
     const svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -918,7 +1125,69 @@ export function mountQuebecRegionsMap(el, config) {
 
     bindMontrealInsetEvents(svgEl);
     updateMontrealLeaders();
+    updateMontrealInsetLabels();
     syncMontrealZoomUi();
+  }
+
+  /** Project inset viewBox coords → map lat/lng (matches svgOverlay bounds). */
+  function insetViewBoxToLatLng(x, y) {
+    const box = insetMapBounds();
+    if (!box?.isValid()) return null;
+    const z = map.getZoom();
+    const sw = map.project(box.getSouthWest(), z);
+    const ne = map.project(box.getNorthEast(), z);
+    const px = sw.x + (x / mtlInsetVb.w) * (ne.x - sw.x);
+    const py = ne.y + (y / mtlInsetVb.h) * (sw.y - ne.y);
+    return map.unproject(L.point(px, py), z);
+  }
+
+  /** Laval / Montréal labels as HTML markers — same face as Saguenay etc. */
+  function updateMontrealInsetLabels() {
+    if (ui.showMontrealInset === false || !mtlInsetLabelLayout.length) {
+      if (mtlInsetLabelLayer) {
+        map.removeLayer(mtlInsetLabelLayer);
+        mtlInsetLabelLayer = null;
+      }
+      mtlInsetLabelMarkers.clear();
+      return;
+    }
+
+    if (!mtlInsetLabelLayer) {
+      mtlInsetLabelLayer = L.layerGroup().addTo(map);
+    }
+
+    const seen = new Set();
+    for (const item of mtlInsetLabelLayout) {
+      const ll = insetViewBoxToLatLng(item.x, item.y);
+      if (!ll) continue;
+      seen.add(item.id);
+      const existing = mtlInsetLabelMarkers.get(item.id);
+      const icon = regionLabelIcon(
+        item.name,
+        item.off ?? { x: 0, y: 0 },
+        'qc-mtl-inset__html-label'
+      );
+      if (existing) {
+        // Move in place — avoid remove/re-add flash on zoom/pan.
+        existing.setLatLng(ll);
+        existing.setIcon(icon);
+        continue;
+      }
+      const marker = L.marker(ll, {
+        interactive: false,
+        keyboard: false,
+        zIndexOffset: 750,
+        icon
+      });
+      mtlInsetLabelMarkers.set(item.id, marker);
+      mtlInsetLabelLayer.addLayer(marker);
+    }
+
+    for (const [id, marker] of mtlInsetLabelMarkers) {
+      if (seen.has(id)) continue;
+      mtlInsetLabelLayer.removeLayer(marker);
+      mtlInsetLabelMarkers.delete(id);
+    }
   }
 
   /** Callout lines: Laval top → inset top, Montréal bottom → inset bottom. */
@@ -994,16 +1263,9 @@ export function mountQuebecRegionsMap(el, config) {
     ]).addTo(map);
   }
 
-  /** Keep Montréal inset labels visible at every zoom. */
+  /** Keep Montréal inset chrome in sync (labels are HTML markers now). */
   function syncMontrealZoomUi() {
     if (ui.showMontrealInset === false) return;
-
-    const svg = mtlInsetOverlay?.getElement?.() ?? mtlInsetOverlay?._image;
-    if (svg) {
-      svg.querySelectorAll('.qc-mtl-inset__label').forEach((node) => {
-        node.style.display = '';
-      });
-    }
   }
 
   function bindMontrealInsetEvents(svgEl) {
@@ -1102,6 +1364,7 @@ export function mountQuebecRegionsMap(el, config) {
       mtlInsetOverlay.setBounds(insetMapBounds());
     }
     updateMontrealLeaders();
+    updateMontrealInsetLabels();
     syncMontrealZoomUi();
     updatePersonBubble();
   }
@@ -1396,8 +1659,9 @@ export function mountQuebecRegionsMap(el, config) {
 
   const onWinResize = () => {
     if (destroyed) return;
-    if (noiseCanvas) resizeNoiseCanvas();
     map.invalidateSize();
+    applyZoomMode();
+    syncMobileChrome();
     if (!regionLayer) return;
     const bounds = regionLayer.getBounds();
     if (bounds.isValid()) clampCameraToRegions(bounds, { fit: true });
@@ -1413,7 +1677,14 @@ export function mountQuebecRegionsMap(el, config) {
     hostResizeObserver.observe(el);
   }
 
-  startNoiseBackground();
+  if (typeof mobileMq.addEventListener === 'function') {
+    mobileMq.addEventListener('change', onWinResize);
+  } else if (typeof mobileMq.addListener === 'function') {
+    mobileMq.addListener(onWinResize);
+  }
+
+  applyZoomMode();
+  syncMobileChrome();
 
   requestAnimationFrame(() => {
     map.invalidateSize();
@@ -1424,9 +1695,24 @@ export function mountQuebecRegionsMap(el, config) {
     map,
     destroy() {
       destroyed = true;
+      window.clearTimeout(heightNotifyTimer);
       clearPersonBubble();
+      if (regionLabelGroup) {
+        map.removeLayer(regionLabelGroup);
+        regionLabelGroup = null;
+      }
+      if (mtlInsetLabelLayer) {
+        map.removeLayer(mtlInsetLabelLayer);
+        mtlInsetLabelLayer = null;
+      }
+      mtlInsetLabelMarkers.clear();
       stopNoiseBackground();
       window.removeEventListener('resize', onWinResize);
+      if (typeof mobileMq.removeEventListener === 'function') {
+        mobileMq.removeEventListener('change', onWinResize);
+      } else if (typeof mobileMq.removeListener === 'function') {
+        mobileMq.removeListener(onWinResize);
+      }
       hostResizeObserver?.disconnect();
       hostResizeObserver = null;
       map.off('zoom move', onMontrealViewChange);
@@ -1493,7 +1779,6 @@ function shellHtml(ui, visibleRegions) {
         <div class="qc-map-pulse" aria-hidden="true"></div>
         <div class="qc-map-canvas" role="application"></div>
         ${legend}
-        ${pubsDrawer}
         <div class="qc-map-quantity" data-quantity>
           <label class="qc-map-quantity__label" for="qc-quantity-range">Zoom</label>
           <div class="qc-map-quantity__pill">
@@ -1511,6 +1796,7 @@ function shellHtml(ui, visibleRegions) {
           </div>
         </div>
       </div>
+      ${pubsDrawer}
     </div>
     <div class="qc-map-status" hidden></div>`;
 }
@@ -1518,9 +1804,8 @@ function shellHtml(ui, visibleRegions) {
 function applyCutoutClass(el, styleCfg = {}) {
   el.className = 'qc-map-root qc-map-root--cutout';
   const pulse = styleCfg.pulseColor || '#7EB6FF';
-  const bg = styleCfg.background || '#eef8fa';
   el.style.setProperty('--qc-pulse-color', pulse);
-  el.style.setProperty('--qc-cutout-bg', bg);
+  el.style.setProperty('--qc-cutout-bg', 'transparent');
 }
 
 function padId(id) {

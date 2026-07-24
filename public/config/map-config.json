@@ -6,7 +6,7 @@
     "center": [53.2, -71.5],
     "zoom": 6,
     "maxZoom": 10,
-    "fitFill": 0.8,
+    "fitFill": 0.98,
     "maxBoundsViscosity": 1
   },
   "ui": {

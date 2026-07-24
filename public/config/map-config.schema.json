@@ -28,8 +28,14 @@
         "fitFill": {
           "type": "number",
           "minimum": 0.5,
-          "maximum": 0.95,
-          "description": "How much of the map container the regions should occupy at max zoom-out (default 0.8)."
+          "maximum": 1,
+          "description": "How much of the map container the regions should occupy at max zoom-out on desktop (default 0.98)."
+        },
+        "fitFillMobile": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 1,
+          "description": "How much of the map container the regions should occupy at max zoom-out on mobile (default 0.85)."
         },
         "maxBounds": { "type": "array" },
         "maxBoundsViscosity": { "type": "number" },

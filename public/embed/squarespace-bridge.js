@@ -22,6 +22,7 @@
 
   var MSG_SET = 'quebec-map:setContent';
   var MSG_READY = 'quebec-map:ready';
+  var MSG_RESIZE = 'quebec-map:resize';
 
   var REGIONS = [
     { id: '01', name: 'Bas-Saint-Laurent', shortName: 'Bas-Saint-Laurent' },
@@ -208,6 +209,9 @@
    * @param {string} [options.contactsUrl]
    * @param {'category'|'tag'|'urlId'} [options.contactRegionFrom]
    * @param {string} [options.siteOrigin]
+   * @param {boolean} [options.autoHeight=true] Grow the iframe when the map
+   *   posts quebec-map:resize (needed on mobile when publications sit below).
+   * @param {number} [options.minHeight=320]
    */
   function mount(options) {
     var opts = options || {};
@@ -219,11 +223,20 @@
 
     var pending = null;
     var destroyed = false;
+    var autoHeight = opts.autoHeight !== false;
+    var minHeight = opts.minHeight != null ? Number(opts.minHeight) : 320;
 
     function send(content) {
       if (destroyed) return;
       pending = content;
       postContent(iframe, content);
+    }
+
+    function applyHeight(height) {
+      if (!autoHeight || destroyed) return;
+      var h = Math.max(minHeight, Math.ceil(Number(height) || 0));
+      if (!isFinite(h) || h <= 0) return;
+      iframe.style.height = h + 'px';
     }
 
     function load() {
@@ -245,9 +258,15 @@
       if (destroyed) return;
       if (iframe.contentWindow && event.source !== iframe.contentWindow) return;
       var data = event.data;
-      if (!data || data.type !== MSG_READY) return;
-      if (pending) postContent(iframe, pending);
-      else load();
+      if (!data || typeof data !== 'object') return;
+      if (data.type === MSG_READY) {
+        if (pending) postContent(iframe, pending);
+        else load();
+        return;
+      }
+      if (data.type === MSG_RESIZE && data.height != null) {
+        applyHeight(data.height);
+      }
     }
 
     function onLoad() {
@@ -261,6 +280,7 @@
     return {
       reload: load,
       setContent: send,
+      setHeight: applyHeight,
       destroy: function () {
         destroyed = true;
         global.removeEventListener('message', onMessage);
