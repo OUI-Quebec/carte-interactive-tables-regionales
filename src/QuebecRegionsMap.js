@@ -166,12 +166,25 @@ export function mountQuebecRegionsMap(el, config) {
     '09': 'Côte-Nord',
     '10': 'Nord-du-Québec'
   };
-  /** Optical pixel nudges from centroid (x right, y down). */
+  /**
+   * Optical pixel nudges from the anchor (x right, y down).
+   * Prefer MAP_LABEL_BOUNDS_FRAC for regions that must stay put across
+   * small vs full-page embeds — fixed px drifts when the map scale changes.
+   */
   const MAP_LABEL_OFFSETS = {
-    '02': { x: 0, y: 45 },
+    '02': { x: 0, y: 0 },
     '08': { x: -15, y: -50 },
-    '09': { x: 0, y: 100 },
+    '09': { x: 0, y: 0 },
     '10': { x: -50, y: 0 }
+  };
+  /**
+   * Scale-independent nudges as a fraction of the region latLng bounds
+   * (x → east, y → south). Used for Saguenay / Côte-Nord so placement
+   * holds when the iframe is short or full-page.
+   */
+  const MAP_LABEL_BOUNDS_FRAC = {
+    '02': { x: 0, y: 0.08 },
+    '09': { x: 0.06, y: 0.12 }
   };
 
   /**
@@ -208,6 +221,30 @@ export function mountQuebecRegionsMap(el, config) {
     });
   }
 
+  /** Anchor lat/lng for a region label (bounds-fraction or centroid). */
+  function regionLabelLatLng(layer, id) {
+    const frac = MAP_LABEL_BOUNDS_FRAC[id];
+    const bounds = layer.getBounds?.();
+    if (frac && bounds?.isValid()) {
+      const base = bounds.getCenter();
+      const h = bounds.getNorth() - bounds.getSouth();
+      const w = bounds.getEast() - bounds.getWest();
+      return L.latLng(
+        base.lat - h * (frac.y || 0),
+        base.lng + w * (frac.x || 0)
+      );
+    }
+
+    if (layer.feature) {
+      const [lon, lat] = featureCentroidLonLat(layer.feature);
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        return L.latLng(lat, lon);
+      }
+    }
+    if (bounds?.isValid()) return bounds.getCenter();
+    return null;
+  }
+
   /** Place region names on polygons (maps-test sizing + offsets for key regions). */
   function syncRegionLabels() {
     if (regionLabelGroup) {
@@ -229,21 +266,11 @@ export function mountQuebecRegionsMap(el, config) {
       const label = mapped || cfg?.shortName || cfg?.name || id;
       if (!label) return;
 
-      let lat;
-      let lon;
-      if (layer.feature) {
-        [lon, lat] = featureCentroidLonLat(layer.feature);
-      } else {
-        const bounds = layer.getBounds?.();
-        if (!bounds?.isValid()) return;
-        const c = bounds.getCenter();
-        lat = c.lat;
-        lon = c.lng;
-      }
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+      const ll = regionLabelLatLng(layer, id);
+      if (!ll) return;
 
       const off = MAP_LABEL_OFFSETS[id] ?? { x: 0, y: 0 };
-      const marker = L.marker([lat, lon], {
+      const marker = L.marker(ll, {
         interactive: false,
         keyboard: false,
         zIndexOffset: 400,
