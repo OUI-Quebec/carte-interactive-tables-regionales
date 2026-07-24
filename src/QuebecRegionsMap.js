@@ -175,8 +175,10 @@ export function mountQuebecRegionsMap(el, config) {
   }
 
   /**
-   * Mobile iframe trap: touches on publications / empty iframe chrome never
-   * reach the Squarespace page. Forward vertical swipes to the parent.
+   * Iframe scroll trap: the embed fills the frame with overflow:hidden, so
+   * wheel/touch never reaches Squarespace. Forward gestures to the parent.
+   * - Mobile: vertical swipes outside the map stage
+   * - Desktop: wheel anywhere (map zoom is locked)
    */
   function setupParentScrollBridge() {
     if (typeof window === 'undefined' || window.parent === window) return;
@@ -193,6 +195,31 @@ export function mountQuebecRegionsMap(el, config) {
         if (under instanceof Element && under.closest('.qc-map-stage')) {
           return false;
         }
+      }
+      return true;
+    };
+
+    const scrollParentBy = (dy) => {
+      if (!dy || !Number.isFinite(dy)) return;
+      window.parent.postMessage({ type: 'quebec-map:scrollBy', dy }, '*');
+    };
+
+    /** True when the floating pubs drawer should consume this wheel itself. */
+    const pubsConsumesWheel = (e) => {
+      if (isMobileViewport()) return false;
+      const pubs =
+        e.target instanceof Element
+          ? e.target.closest('[data-pubs-drawer]')
+          : null;
+      if (!pubs?.classList.contains('is-open')) return false;
+      if (pubs.scrollHeight <= pubs.clientHeight + 1) return false;
+      const delta = e.deltaY;
+      if (delta < 0 && pubs.scrollTop <= 0) return false;
+      if (
+        delta > 0 &&
+        pubs.scrollTop + pubs.clientHeight >= pubs.scrollHeight - 1
+      ) {
+        return false;
       }
       return true;
     };
@@ -221,11 +248,18 @@ export function mountQuebecRegionsMap(el, config) {
       lastY = y;
       if (dy === 0) return;
       e.preventDefault();
-      window.parent.postMessage({ type: 'quebec-map:scrollBy', dy }, '*');
+      scrollParentBy(dy);
     };
 
     const end = () => {
       active = false;
+    };
+
+    const onWheel = (e) => {
+      if (pubsConsumesWheel(e)) return;
+      // Desktop: always forward (zoom is off). Mobile: forward wheel too.
+      e.preventDefault();
+      scrollParentBy(e.deltaY);
     };
 
     document.addEventListener('touchstart', onTouchStart, {
@@ -239,6 +273,10 @@ export function mountQuebecRegionsMap(el, config) {
     document.addEventListener('touchend', end, { passive: true, capture: true });
     document.addEventListener('touchcancel', end, {
       passive: true,
+      capture: true
+    });
+    document.addEventListener('wheel', onWheel, {
+      passive: false,
       capture: true
     });
   }
@@ -694,6 +732,24 @@ export function mountQuebecRegionsMap(el, config) {
       const pane = map.getPane('contactStemPane');
       pane.style.zIndex = '550';
       pane.style.pointerEvents = 'none';
+    }
+  }
+
+  /**
+   * Stacking: region fills (overlay ~400) < leader lines < Montréal inset box
+   * < contact stem < markers / legend. Keeps callout lines above the map.
+   */
+  function ensureMtlChromePanes() {
+    if (!map.getPane('mtlLeaderPane')) {
+      map.createPane('mtlLeaderPane');
+      const leaders = map.getPane('mtlLeaderPane');
+      leaders.style.zIndex = '450';
+      leaders.style.pointerEvents = 'none';
+    }
+    if (!map.getPane('mtlInsetPane')) {
+      map.createPane('mtlInsetPane');
+      const inset = map.getPane('mtlInsetPane');
+      inset.style.zIndex = '500';
     }
   }
 
@@ -1327,9 +1383,11 @@ export function mountQuebecRegionsMap(el, config) {
     svgEl.setAttribute('class', 'qc-mtl-inset-svg-overlay');
     svgEl.innerHTML = svgInner;
 
+    ensureMtlChromePanes();
     mtlInsetOverlay = L.svgOverlay(svgEl, insetMapBounds(), {
       opacity: 1,
       interactive: true,
+      pane: 'mtlInsetPane',
       zIndex: 700,
       className: 'qc-mtl-inset-overlay'
     }).addTo(map);
@@ -1462,9 +1520,11 @@ export function mountQuebecRegionsMap(el, config) {
       opacity: 0.85,
       lineCap: 'round',
       interactive: false,
-      className: 'qc-mtl-leader'
+      className: 'qc-mtl-leader',
+      pane: 'mtlLeaderPane'
     };
 
+    ensureMtlChromePanes();
     if (mtlLeaderLayer) {
       map.removeLayer(mtlLeaderLayer);
     }
@@ -1834,13 +1894,6 @@ export function mountQuebecRegionsMap(el, config) {
   }
   if (pubsPane) {
     L.DomEvent.disableClickPropagation(pubsPane);
-    // Desktop: keep wheel over the floating panel from zooming the map.
-    // Mobile: do NOT trap scroll — publications sit below the map and must
-    // let the page / parent iframe scroll.
-    const onPubsWheel = (e) => {
-      if (!isMobileViewport()) e.stopPropagation();
-    };
-    pubsPane.addEventListener('wheel', onPubsWheel, { passive: true });
   }
 
   /** Bottom-right quantity slider ↔ map zoom. */
