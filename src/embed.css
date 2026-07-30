@@ -255,7 +255,7 @@ body {
   line-height: 1.25;
 }
 
-/* Floating publications panel — inset from the right, not edge-docked.
+/* Floating region panel — inset from the right, not edge-docked.
    Sibling of .qc-map-stage so mobile can place it below the map in flow. */
 .qc-map-pubs-drawer {
   position: absolute;
@@ -263,7 +263,7 @@ body {
   right: 16px;
   bottom: 16px;
   z-index: 700;
-  width: min(300px, calc(100% - 32px));
+  width: min(340px, calc(100% - 32px));
   background: #ffffff;
   border: 1px solid rgba(15, 40, 70, 0.1);
   border-radius: 18px;
@@ -293,11 +293,40 @@ body {
 
 .qc-map-pubs__heading {
   font-family: Roboto, 'Source Sans 3', 'Segoe UI', system-ui, sans-serif;
-  font-size: 0.78rem;
+  font-size: 1rem;
   font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: #0a0a0a;
+  margin: 0;
+  line-height: 1.25;
+}
+
+.qc-map-pubs__cms {
+  font-family: 'Source Sans 3', 'Segoe UI', system-ui, sans-serif;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: #1a202c;
+}
+
+.qc-map-pubs__cms :where(p, ul, ol, h1, h2, h3, h4, figure) {
+  margin: 0 0 0.75rem;
+}
+
+.qc-map-pubs__cms :where(ul, ol) {
+  padding-left: 1.2rem;
+}
+
+.qc-map-pubs__cms img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0.5rem 0;
+}
+
+.qc-map-pubs__cms a {
+  color: #0b5cab;
+  text-decoration: underline;
 }
 
 .qc-map-pubs__close {
@@ -565,6 +594,13 @@ body {
   font-size: 0.65rem;
   color: #718096;
   font-style: italic;
+}
+
+.qc-person-bubble__email {
+  color: #0b5cab;
+  text-decoration: underline;
+  font-style: normal;
+  word-break: break-all;
 }
 
 .qc-person-bubble__cms {

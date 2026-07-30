@@ -14,7 +14,8 @@ const MSG_READY = 'quebec-map:ready';
  * 3. config/map-config.json (BASE_URL-relative for GitHub Pages)
  *
  * CMS content arrives via postMessage (`quebec-map:setContent`) from the
- * parent page (Squarespace bridge), optional config.content, or ?demoContent=1.
+ * Squarespace bridge (publications + responsables), optional config.content,
+ * or ?demoContent=1. Partial payloads merge.
  */
 async function resolveConfig() {
   if (window.__QUEBEC_MAP_CONFIG__) {

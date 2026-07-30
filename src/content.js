@@ -46,7 +46,12 @@ export function sanitizeHtml(html) {
     'H3',
     'H4',
     'BLOCKQUOTE',
-    'HR'
+    'HR',
+    'IMG',
+    'FIGURE',
+    'FIGCAPTION',
+    'SECTION',
+    'ARTICLE'
   ]);
 
   const scrub = (parent) => {
@@ -75,6 +80,15 @@ export function sanitizeHtml(html) {
           } else {
             el.setAttribute('target', '_blank');
             el.setAttribute('rel', 'noopener noreferrer');
+          }
+          continue;
+        }
+        if (el.tagName === 'IMG' && (name === 'src' || name === 'alt' || name === 'loading' || name === 'width' || name === 'height')) {
+          if (name === 'src') {
+            const src = String(attr.value || '').trim();
+            if (!/^(https?:|data:image\/|\/)/i.test(src)) {
+              el.removeAttribute('src');
+            }
           }
           continue;
         }
@@ -116,30 +130,105 @@ export function stripHtml(html) {
 }
 
 /**
+ * Normalize a full or partial CMS payload.
  * @param {unknown} raw
- * @returns {{ contacts: Record<string, object>, publications: object[] }}
+ * @returns {{
+ *   contacts?: Record<string, object>,
+ *   publications?: object[],
+ *   regionPages?: Record<string, object>,
+ *   hasContacts: boolean,
+ *   hasPublications: boolean,
+ *   hasRegionPages: boolean
+ * }}
  */
 export function normalizeContent(raw) {
   const src = raw && typeof raw === 'object' ? /** @type {any} */ (raw) : {};
-  /** @type {Record<string, object>} */
-  const contacts = {};
-  const contactSrc = src.contacts && typeof src.contacts === 'object' ? src.contacts : {};
-  for (const [key, value] of Object.entries(contactSrc)) {
-    const id = padRegionId(key);
-    if (!/^(0[1-9]|1[0-7])$/.test(id)) continue;
-    const c = value && typeof value === 'object' ? value : {};
-    contacts[id] = {
-      fullName: c.fullName != null ? String(c.fullName) : '',
-      profileImg: c.profileImg != null && c.profileImg !== '' ? String(c.profileImg) : null,
-      title: c.title != null ? String(c.title) : null,
-      body: c.body != null ? String(c.body) : null
-    };
+  const hasContacts = Object.prototype.hasOwnProperty.call(src, 'contacts');
+  const hasPublications = Object.prototype.hasOwnProperty.call(src, 'publications');
+  const hasRegionPages = Object.prototype.hasOwnProperty.call(src, 'regionPages');
+
+  /** @type {Record<string, object> | undefined} */
+  let contacts;
+  if (hasContacts) {
+    contacts = {};
+    const contactSrc =
+      src.contacts && typeof src.contacts === 'object' && !Array.isArray(src.contacts)
+        ? src.contacts
+        : {};
+    for (const [key, value] of Object.entries(contactSrc)) {
+      const id = padRegionId(key);
+      if (!/^(0[1-9]|1[0-7])$/.test(id)) continue;
+      const c = value && typeof value === 'object' ? value : {};
+      contacts[id] = {
+        fullName: c.fullName != null ? String(c.fullName) : '',
+        profileImg:
+          c.profileImg != null && c.profileImg !== '' ? String(c.profileImg) : null,
+        title: c.title != null ? String(c.title) : null,
+        email: c.email != null && c.email !== '' ? String(c.email) : null,
+        body: c.body != null ? String(c.body) : null
+      };
+    }
   }
 
-  const pubsIn = Array.isArray(src.publications) ? src.publications : [];
-  const publications = pubsIn.map((p, i) => normalizePublication(p, i)).filter(Boolean);
+  /** @type {object[] | undefined} */
+  let publications;
+  if (hasPublications) {
+    const pubsIn = Array.isArray(src.publications) ? src.publications : [];
+    publications = pubsIn.map((p, i) => normalizePublication(p, i)).filter(Boolean);
+  }
 
-  return { contacts, publications };
+  /** @type {Record<string, object> | undefined} */
+  let regionPages;
+  if (hasRegionPages) {
+    regionPages = {};
+    const pageSrc =
+      src.regionPages && typeof src.regionPages === 'object' && !Array.isArray(src.regionPages)
+        ? src.regionPages
+        : {};
+    for (const [key, value] of Object.entries(pageSrc)) {
+      const id = padRegionId(key);
+      if (!/^(0[1-9]|1[0-7])$/.test(id)) continue;
+      const p = value && typeof value === 'object' ? value : {};
+      regionPages[id] = {
+        title: p.title != null ? String(p.title) : '',
+        body: p.body != null ? String(p.body) : '',
+        url: p.url != null ? String(p.url) : null
+      };
+    }
+  }
+
+  return {
+    contacts,
+    publications,
+    regionPages,
+    hasContacts,
+    hasPublications,
+    hasRegionPages
+  };
+}
+
+/**
+ * Merge a partial content update into existing CMS state.
+ * Omitting a key leaves that side unchanged.
+ * @param {{
+ *   contacts?: Record<string, object>,
+ *   publications?: object[],
+ *   regionPages?: Record<string, object>
+ * }} current
+ * @param {unknown} raw
+ */
+export function mergeContent(current, raw) {
+  const next = normalizeContent(raw);
+  const base = current && typeof current === 'object' ? current : {};
+  return {
+    contacts: next.hasContacts ? next.contacts ?? {} : base.contacts ?? {},
+    publications: next.hasPublications
+      ? next.publications ?? []
+      : base.publications ?? [],
+    regionPages: next.hasRegionPages
+      ? next.regionPages ?? {}
+      : base.regionPages ?? {}
+  };
 }
 
 /**

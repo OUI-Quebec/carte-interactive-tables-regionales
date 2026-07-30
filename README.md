@@ -4,6 +4,8 @@ Plain JS + Leaflet cutout map of Québec’s **17 régions administratives**, em
 
 UI: map + legend + publications drawer + responsible-person popup.
 
+**Content managers:** see **[CONTENT.md](./CONTENT.md)** for how to plug Squarespace publications and responsables into the map.
+
 ## Quick start
 
 ```bash
@@ -34,7 +36,10 @@ VITE_BASE=/REPO/ npm run build
 
 ## Squarespace iframe embed
 
-The map **does not** fetch Squarespace JSON (CORS). The parent page loads `?format=json` same-origin and **postMessages** content into the iframe.
+For the full content workflow, see **[CONTENT.md](./CONTENT.md)**.
+
+- **Region panel** — `/carte-tables-regionales?format=json` (`urlId` → region shortName; `body` = SQS HTML)
+- **Responsables** — `/carte-tables-rgionales-responsables?format=json` (`urlId` → region; Nom / Rôle / email / photo from SQS body)
 
 ```html
 <iframe
@@ -42,56 +47,22 @@ The map **does not** fetch Squarespace JSON (CORS). The parent page loads `?form
   src="https://ORG.github.io/REPO/"
   title="Carte des régions administratives du Québec"
   style="width:100%;height:720px;border:0;display:block;"
+  data-qc-region-pages="/carte-tables-regionales"
+  data-qc-contacts="/carte-tables-rgionales-responsables"
+  data-qc-contact-region-from="urlId"
 ></iframe>
+<script src="https://ORG.github.io/REPO/embed/content-models.js"></script>
 <script src="https://ORG.github.io/REPO/embed/squarespace-bridge.js"></script>
 <script>
-  QuebecMapBridge.mount({
-    iframe: '#qc-map',
-    publicationsUrl: '/publications?format=json',
-    contactsUrl: '/responsables?format=json',
-    contactRegionFrom: 'category'
-    // autoHeight: true (default) — stretches the iframe on mobile when
-    // publications open below the map (listens for quebec-map:resize).
-  });
+  QuebecMapBridge.mount({ iframe: '#qc-map' });
 </script>
 ```
 
-On mobile, publications render **below** the map. The iframe starts at a fixed height (e.g. `720px`); the bridge then grows it when the map posts `quebec-map:resize`. Keep using `squarespace-bridge.js` so that works — Squarespace will not stretch a bare iframe on its own.
+Content mapping (`urlId` → region, Nom/Rôle/email, region body) is in [`public/embed/content-models.js`](public/embed/content-models.js). Load it before the bridge.
 
-Wheel / touch over the map is forwarded to the host via `quebec-map:scrollBy`. Redeploy Pages **and** refresh the bridge script on Squarespace (CDN/cache) so both sides stay in sync.
+On mobile, the region panel renders **below** the map. The iframe starts at a fixed height (e.g. `720px`); the bridge then grows it when the map posts `quebec-map:resize`.
 
-### Content contract
-
-```js
-{
-  type: 'quebec-map:setContent',
-  content: {
-    contacts: {
-      "09": {
-        fullName: "…",
-        profileImg: "https://…",
-        title: "…",
-        body: "<p>HTML from CMS</p>"
-      }
-    },
-    publications: [
-      {
-        id: "…",
-        title: "…",
-        summary: "plain text",
-        publishedAt: 1717200000000,
-        url: "https://…",
-        imageUrl: "https://…",
-        lat: 50.21,
-        lng: -66.38
-      }
-    ]
-  }
-}
-```
-
-- **Contacts** keyed by region id (`01`–`17`).
-- **Publications** assigned via geographic `findRegionAt(lng, lat)`.
+Wheel / touch over the map is forwarded to the host via `quebec-map:scrollBy`. Redeploy Pages **and** refresh the bridge script on Squarespace so both sides stay in sync.
 
 ## API
 

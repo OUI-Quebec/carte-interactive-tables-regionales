@@ -1,7 +1,7 @@
 import L from 'leaflet';
 import { createLayoutEngine } from './layout.js';
 import {
-  normalizeContent,
+  mergeContent,
   indexPublicationsByRegion,
   sanitizeHtml,
   formatPubDate
@@ -76,7 +76,10 @@ export function mountQuebecRegionsMap(el, config) {
   let personBubbleAnchor = null;
 
   /** CMS content from parent postMessage / config.content / demo. */
-  let cmsContent = normalizeContent(config.content ?? null);
+  let cmsContent = mergeContent(
+    { contacts: {}, publications: [], regionPages: {} },
+    config.content ?? null
+  );
   /** @type {Map<string, object[]>} */
   let pubsByRegion = new Map();
 
@@ -87,6 +90,7 @@ export function mountQuebecRegionsMap(el, config) {
   const statusEl = el.querySelector('.qc-map-status');
   const pubsPane = el.querySelector('[data-pubs-drawer]');
   const pubsRegionEl = el.querySelector('[data-pubs-region]');
+  const pubsBodyEl = el.querySelector('[data-pubs-body]');
   const pubsListEl = el.querySelector('[data-pubs-list]');
   const pubsCloseBtn = el.querySelector('[data-pubs-close]');
   const quantityRoot = el.querySelector('[data-quantity]');
@@ -595,7 +599,7 @@ export function mountQuebecRegionsMap(el, config) {
     const padL = legendRight;
     // Floating pubs panel (desktop only): inset 16px from right, ~300px wide (+ gap).
     // On mobile, publications sit below the map — no side padding.
-    const pubsW = Math.min(300, Math.max(0, size.x - 32));
+    const pubsW = Math.min(340, Math.max(0, size.x - 32));
     const padR =
       (pubsOpen && !isMobileViewport() ? pubsW + 16 : 0) + 16;
     const padT = 16;
@@ -775,11 +779,13 @@ export function mountQuebecRegionsMap(el, config) {
 
   /**
    * Apply CMS contacts + publications (from parent postMessage or config).
+   * Partial payloads merge: pubs-only from the bridge does not wipe contacts
+   * already loaded from map-config.json.
    * Publications are assigned to regions via geographic lat/lng PIP.
    * @param {object} content
    */
   function setContent(content) {
-    cmsContent = normalizeContent(content);
+    cmsContent = mergeContent(cmsContent, content);
     reindexPublications();
     if (selectedId) {
       syncPublicationsPanel();
@@ -788,10 +794,34 @@ export function mountQuebecRegionsMap(el, config) {
     }
   }
 
+  function hasRegionPanelContent(rid) {
+    if (!rid) return false;
+    const page = cmsContent.regionPages?.[rid];
+    const body = page?.body != null ? String(page.body).trim() : '';
+    if (body) return true;
+    const pubs = pubsByRegion.get(rid) ?? [];
+    return pubs.length > 0;
+  }
+
+  function hasContactContent(rid) {
+    if (!rid) return false;
+    const c = cmsContent.contacts?.[rid];
+    if (!c || typeof c !== 'object') return false;
+    return Boolean(
+      (c.fullName && String(c.fullName).trim()) ||
+        (c.email && String(c.email).trim()) ||
+        (c.profileImg && String(c.profileImg).trim()) ||
+        (c.title && String(c.title).trim()) ||
+        (c.body && String(c.body).trim())
+    );
+  }
+
   function showPersonBubble(id, layer) {
     clearPersonBubble();
-    ensureContactStemPane();
     const rid = padId(id);
+    if (!hasContactContent(rid) || !layer) return;
+
+    ensureContactStemPane();
     const cfg = regionById.get(rid);
     const regionName = cfg?.shortName || cfg?.name || rid;
     const contact = cmsContent.contacts[rid] ?? null;
@@ -800,15 +830,21 @@ export function mountQuebecRegionsMap(el, config) {
     const target = insetTarget || layer.getBounds().getCenter();
     personBubbleAnchor = { id: rid, target };
 
-    const fullName = contact?.fullName?.trim() || 'Nom Prénom';
-    const role = contact?.title?.trim() || 'Titre / rôle';
+    const fullName = contact?.fullName?.trim() || '';
+    const role = contact?.title?.trim() || '';
+    const email = contact?.email?.trim() || '';
     const bodyHtml = contact?.body ? sanitizeHtml(contact.body) : '';
     const photoInner = contact?.profileImg
       ? `<img class="qc-person-bubble__photo-img" src="${escapeAttr(contact.profileImg)}" alt="" loading="lazy" />`
       : `<span class="qc-person-bubble__photo-ph">Photo</span>`;
+    const emailBlock = email
+      ? `<a class="qc-person-bubble__email" href="mailto:${escapeAttr(email)}">${escapeHtml(email)}</a>`
+      : '';
     const noteBlock = bodyHtml
       ? `<div class="qc-person-bubble__cms">${bodyHtml}</div>`
-      : `<div class="qc-person-bubble__note">Informations à venir</div>`;
+      : emailBlock
+        ? `<div class="qc-person-bubble__note">${emailBlock}</div>`
+        : '';
 
     const layoutCard = computeContactCardLayout(target, { regionId: rid });
     const html = `
@@ -821,8 +857,8 @@ export function mountQuebecRegionsMap(el, config) {
             ${photoInner}
           </div>
           <div class="qc-person-bubble__meta">
-            <div class="qc-person-bubble__name">${escapeHtml(fullName)}</div>
-            <div class="qc-person-bubble__role">${escapeHtml(role)}</div>
+            ${fullName ? `<div class="qc-person-bubble__name">${escapeHtml(fullName)}</div>` : ''}
+            ${role ? `<div class="qc-person-bubble__role">${escapeHtml(role)}</div>` : ''}
             ${noteBlock}
           </div>
         </div>
@@ -868,7 +904,14 @@ export function mountQuebecRegionsMap(el, config) {
   }
 
   function updatePersonBubble() {
-    if (!personBubbleAnchor || !selectedId) return;
+    if (!personBubbleAnchor || !selectedId) {
+      if (!selectedId || !hasContactContent(selectedId)) clearPersonBubble();
+      return;
+    }
+    if (!hasContactContent(personBubbleAnchor.id)) {
+      clearPersonBubble();
+      return;
+    }
     const layer = regionLayersById.get(personBubbleAnchor.id);
     if (!layer) return;
     showPersonBubble(personBubbleAnchor.id, layer);
@@ -890,29 +933,56 @@ export function mountQuebecRegionsMap(el, config) {
   }
 
   function syncPublicationsPanel() {
-    const open = Boolean(selectedId);
-    el.classList.toggle('qc-map-root--region-selected', open);
+    const hasPanel =
+      Boolean(selectedId) && hasRegionPanelContent(selectedId);
+    el.classList.toggle('qc-map-root--region-selected', hasPanel);
     if (pubsPane) {
-      pubsPane.hidden = false;
-      pubsPane.classList.toggle('is-open', open);
-      pubsPane.setAttribute('aria-hidden', open ? 'false' : 'true');
+      pubsPane.hidden = !hasPanel;
+      pubsPane.classList.toggle('is-open', hasPanel);
+      pubsPane.setAttribute('aria-hidden', hasPanel ? 'false' : 'true');
     }
-    if (!open || !selectedId) {
+    if (!selectedId || !hasPanel) {
+      if (pubsBodyEl) {
+        pubsBodyEl.innerHTML = '';
+        pubsBodyEl.hidden = true;
+      }
+      if (pubsListEl) {
+        pubsListEl.innerHTML = '';
+        pubsListEl.hidden = true;
+      }
+      if (pubsRegionEl) pubsRegionEl.textContent = '';
       updatePersonBubble();
       notifyHostHeight();
       return;
     }
 
     const cfg = regionById.get(selectedId);
-    const name = cfg?.name || selectedId;
+    const name = cfg?.shortName || cfg?.name || selectedId;
     if (pubsRegionEl) {
       pubsRegionEl.textContent = name;
     }
+
+    const page = cmsContent.regionPages?.[selectedId] ?? null;
+    const bodyHtml = page?.body ? sanitizeHtml(page.body) : '';
+
+    if (pubsBodyEl) {
+      if (bodyHtml) {
+        pubsBodyEl.innerHTML = bodyHtml;
+        pubsBodyEl.hidden = false;
+      } else {
+        pubsBodyEl.innerHTML = '';
+        pubsBodyEl.hidden = true;
+      }
+    }
+
+    // Legacy pub cards: only if no region page body and pubs exist.
     if (pubsListEl) {
       const pubs = pubsByRegion.get(selectedId) ?? [];
-      if (!pubs.length) {
-        pubsListEl.innerHTML = `<li class="qc-map-pubs__empty">Aucune publication pour cette région.</li>`;
+      if (bodyHtml || !pubs.length) {
+        pubsListEl.innerHTML = '';
+        pubsListEl.hidden = true;
       } else {
+        pubsListEl.hidden = false;
         pubsListEl.innerHTML = pubs
           .map((pub) => {
             const href = pub.url || '#';
@@ -2059,16 +2129,16 @@ function shellHtml(ui, visibleRegions) {
   const pubsDrawer = `<aside
       class="qc-map-pubs-drawer"
       data-pubs-drawer
-      aria-label="Publications de la région"
+      aria-label="Contenu de la région"
       aria-hidden="true"
     >
       <div class="qc-map-pubs">
         <div class="qc-map-pubs__head">
-          <div class="qc-map-pubs__heading">Dernières publications</div>
+          <h2 class="qc-map-pubs__heading" data-pubs-region></h2>
           <button type="button" class="qc-map-pubs__close" data-pubs-close aria-label="Fermer">×</button>
         </div>
-        <p class="qc-map-pubs__region" data-pubs-region></p>
-        <ul class="qc-map-pubs__list" data-pubs-list></ul>
+        <div class="qc-map-pubs__cms" data-pubs-body></div>
+        <ul class="qc-map-pubs__list" data-pubs-list hidden></ul>
       </div>
     </aside>`;
 
