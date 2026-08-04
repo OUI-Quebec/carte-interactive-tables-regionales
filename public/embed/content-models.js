@@ -83,8 +83,8 @@
    */
   var RESPONSABLE_FIELDS = {
     regionFrom: ['urlId', 'title'],
-    fullNameFromBody: /Nom\s*:\s*(.+?)(?=\s+R[oô]le\s*:|$)/i,
-    roleFromBody: /R[oô]le\s*:\s*(.+?)(?=\s+Nom\s*:|$)/i,
+    fullNameFromBody: /Nom\s*:\s*([^\n#]{1,120}?)(?=\s+R[oô]le\s*:|$)/i,
+    roleFromBody: /R[oô]le\s*:\s*([^\n#{}]{1,80})/i,
     photoFromItem: ['profileImg', 'assetUrl'],
     emailFromMailto: true
   };
@@ -200,6 +200,7 @@
 
   /**
    * Pull Nom / Rôle / mailto / img out of Squarespace SQS body HTML.
+   * Ignores <style>/<script> text (SQS injects CSS into the body string).
    */
   function parseResponsableBody(html) {
     var out = { fullName: null, title: null, email: null, profileImg: null };
@@ -211,6 +212,13 @@
     } catch (err) {
       return out;
     }
+
+    // Remove chrome so textContent is real copy, not CSS rules.
+    doc
+      .querySelectorAll('style, script, noscript, template, link, meta')
+      .forEach(function (el) {
+        el.remove();
+      });
 
     if (RESPONSABLE_FIELDS.emailFromMailto) {
       var mailto = doc.querySelector('a[href^="mailto:"], a[href^="MAILTO:"]');
@@ -227,8 +235,20 @@
       if (src) out.profileImg = src;
     }
 
-    var text = (doc.body && (doc.body.textContent || doc.body.innerText)) || '';
-    text = text.replace(/\s+/g, ' ').trim();
+    // Prefer Squarespace text blocks; fall back to remaining body text.
+    var chunks = [];
+    doc
+      .querySelectorAll('.sqs-html-content, [data-sqsp-text-block-content]')
+      .forEach(function (el) {
+        var t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (t) chunks.push(t);
+      });
+    var text =
+      chunks.length > 0
+        ? chunks.join(' ')
+        : ((doc.body && (doc.body.textContent || doc.body.innerText)) || '')
+            .replace(/\s+/g, ' ')
+            .trim();
 
     if (!out.email) {
       var em = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
@@ -243,13 +263,21 @@
         .replace(/\(\s*\)/g, '')
         .trim()
         .replace(/[,\s]+$/g, '');
-      if (name) out.fullName = name;
+      // Clamp — avoid swallowing CSS if a style tag slipped through.
+      if (name && name.length < 120 && name.indexOf('{') === -1) {
+        out.fullName = name;
+      }
     }
 
     var role = text.match(RESPONSABLE_FIELDS.roleFromBody);
     if (role) {
-      var roleText = role[1].trim();
-      if (roleText) out.title = roleText;
+      var roleText = role[1]
+        .replace(/#block-[\s\S]*$/i, '')
+        .replace(/\{[\s\S]*$/g, '')
+        .trim();
+      if (roleText && roleText.length < 80 && roleText.indexOf('{') === -1) {
+        out.title = roleText;
+      }
     }
 
     return out;

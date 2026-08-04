@@ -53,6 +53,19 @@ export function sanitizeHtml(html) {
     'SECTION',
     'ARTICLE'
   ]);
+  // Drop entirely (do NOT unwrap — <style>/<script> text would become visible).
+  const removeEntire = new Set([
+    'STYLE',
+    'SCRIPT',
+    'LINK',
+    'META',
+    'NOSCRIPT',
+    'TEMPLATE',
+    'IFRAME',
+    'OBJECT',
+    'EMBED',
+    'SVG'
+  ]);
 
   const scrub = (parent) => {
     for (const child of [...parent.childNodes]) {
@@ -62,6 +75,10 @@ export function sanitizeHtml(html) {
       }
       if (child.nodeType !== Node.ELEMENT_NODE) continue;
       const el = /** @type {Element} */ (child);
+      if (removeEntire.has(el.tagName)) {
+        parent.removeChild(el);
+        continue;
+      }
       if (!allowed.has(el.tagName)) {
         while (el.firstChild) parent.insertBefore(el.firstChild, el);
         parent.removeChild(el);
@@ -83,7 +100,14 @@ export function sanitizeHtml(html) {
           }
           continue;
         }
-        if (el.tagName === 'IMG' && (name === 'src' || name === 'alt' || name === 'loading' || name === 'width' || name === 'height')) {
+        if (
+          el.tagName === 'IMG' &&
+          (name === 'src' ||
+            name === 'alt' ||
+            name === 'loading' ||
+            name === 'width' ||
+            name === 'height')
+        ) {
           if (name === 'src') {
             const src = String(attr.value || '').trim();
             if (!/^(https?:|data:image\/|\/)/i.test(src)) {
@@ -126,6 +150,9 @@ export function extractSummary(item) {
 /** @param {string} html */
 export function stripHtml(html) {
   const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
+  doc
+    .querySelectorAll('style, script, noscript, template, link, meta')
+    .forEach((el) => el.remove());
   return doc.body.textContent || '';
 }
 

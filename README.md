@@ -2,9 +2,9 @@
 
 Plain JS + Leaflet cutout map of Québec’s **17 régions administratives**, embeddable in an iframe (GitHub Pages → Squarespace).
 
-UI: map + legend + publications drawer + responsible-person popup.
+UI: map + legend + region content panel + responsible-person popup.
 
-**Content managers:** see **[CONTENT.md](./CONTENT.md)** for how to plug Squarespace publications and responsables into the map.
+**Content managers:** see **[CONTENT.md](./CONTENT.md)** for Squarespace collections, `urlId` matching, and embed setup.
 
 ## Quick start
 
