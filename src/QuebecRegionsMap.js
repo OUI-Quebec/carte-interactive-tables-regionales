@@ -827,6 +827,52 @@ export function mountQuebecRegionsMap(el, config) {
     return t;
   }
 
+  /**
+   * Fluid contact-card size from the map container so the bubble fits phones,
+   * tablets, and desktop iframes (Leaflet iconSize must stay in sync).
+   * @param {boolean} hasPhoto
+   */
+  function computeContactBubbleMetrics(hasPhoto) {
+    const size = map.getSize();
+    const mapW = Math.max(240, size.x);
+    const mapH = Math.max(200, size.y);
+    const maxW = Math.min(mapW * 0.92, mapW - 12);
+    const maxH = Math.min(mapH * 0.58, mapH - 20);
+    const stacked = mapW < 480;
+
+    if (hasPhoto) {
+      if (stacked) {
+        const w = Math.round(Math.min(maxW, Math.max(200, mapW * 0.88)));
+        const photoH = Math.round(
+          Math.min(Math.max(100, w * 0.62), maxH * 0.52, 200)
+        );
+        const textH = Math.round(Math.max(68, Math.min(100, mapH * 0.15)));
+        const bannerH = Math.round(Math.max(22, Math.min(34, mapH * 0.045)));
+        const h = Math.round(Math.min(maxH, bannerH + photoH + textH));
+        return { w, h, photoW: w, photoH, stacked: true };
+      }
+      const w = Math.round(
+        Math.min(maxW, Math.max(240, Math.min(460, mapW * 0.5)))
+      );
+      const h = Math.round(
+        Math.min(
+          maxH,
+          Math.max(130, Math.min(270, Math.min(mapW * 0.3, mapH * 0.4)))
+        )
+      );
+      const photoW = Math.round(Math.min(w * 0.48, Math.max(88, h - 30)));
+      return { w, h, photoW, photoH: h, stacked: false };
+    }
+
+    const w = Math.round(
+      Math.min(maxW, Math.max(168, Math.min(300, mapW * 0.42)))
+    );
+    const h = Math.round(
+      Math.min(maxH, Math.max(84, Math.min(128, mapH * 0.18)))
+    );
+    return { w, h, stacked: false };
+  }
+
   function showPersonBubble(id, layer) {
     clearPersonBubble();
     const rid = padId(id);
@@ -849,9 +895,6 @@ export function mountQuebecRegionsMap(el, config) {
       contact?.profileImg && String(contact.profileImg).trim()
         ? String(contact.profileImg).trim()
         : '';
-    const photoInner = photoUrl
-      ? `<img class="qc-person-bubble__photo-img" src="${escapeAttr(photoUrl)}" alt="" loading="lazy" />`
-      : `<span class="qc-person-bubble__photo-ph">Photo</span>`;
     const emailBlock = email
       ? `<a class="qc-person-bubble__email" href="mailto:${escapeAttr(email)}">${escapeHtml(email)}</a>`
       : '';
@@ -859,20 +902,41 @@ export function mountQuebecRegionsMap(el, config) {
       ? `<div class="qc-person-bubble__note">${emailBlock}</div>`
       : '';
 
+    const metrics = computeContactBubbleMetrics(Boolean(photoUrl));
+    const bubbleW = metrics.w;
+    const bubbleH = metrics.h;
     const layoutCard = computeContactCardLayout(target, {
       regionId: rid,
-      bubbleW: photoUrl ? 320 : 260,
-      bubbleH: 140
+      bubbleW,
+      bubbleH
     });
+    const styleVars = [
+      metrics.photoW != null ? `--qc-photo-w:${Math.round(metrics.photoW)}px` : '',
+      metrics.stacked && metrics.photoH != null
+        ? `--qc-photo-h:${Math.round(metrics.photoH)}px`
+        : ''
+    ]
+      .filter(Boolean)
+      .join(';');
+    const bubbleClass = [
+      'qc-person-bubble',
+      photoUrl ? 'qc-person-bubble--with-photo' : '',
+      metrics.stacked ? 'qc-person-bubble--stacked' : ''
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const photoBlock = photoUrl
+      ? `<div class="qc-person-bubble__photo" aria-hidden="true">
+            <img class="qc-person-bubble__photo-img" src="${escapeAttr(photoUrl)}" alt="" loading="lazy" />
+          </div>`
+      : '';
     const html = `
-      <div class="qc-person-bubble" role="dialog" aria-label="Contact — ${escapeAttr(regionName)}">
+      <div class="${bubbleClass}"${styleVars ? ` style="${styleVars}"` : ''} role="dialog" aria-label="Contact — ${escapeAttr(regionName)}">
         <div class="qc-person-bubble__banner">
           <span>${escapeHtml(regionName)}</span>
         </div>
         <div class="qc-person-bubble__body">
-          <div class="qc-person-bubble__photo" aria-hidden="true">
-            ${photoInner}
-          </div>
+          ${photoBlock}
           <div class="qc-person-bubble__meta">
             ${fullName ? `<div class="qc-person-bubble__name">${escapeHtml(fullName)}</div>` : ''}
             ${role ? `<div class="qc-person-bubble__role">${escapeHtml(role)}</div>` : ''}
@@ -888,7 +952,7 @@ export function mountQuebecRegionsMap(el, config) {
       icon: L.divIcon({
         className: 'qc-person-bubble-wrap',
         html,
-        iconSize: [photoUrl ? 320 : 260, 140],
+        iconSize: [bubbleW, bubbleH],
         iconAnchor: [0, 0]
       })
     });

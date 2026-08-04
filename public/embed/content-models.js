@@ -83,7 +83,8 @@
    */
   var RESPONSABLE_FIELDS = {
     regionFrom: ['urlId', 'title'],
-    fullNameFromBody: /Nom\s*:\s*([^\n#]{1,120}?)(?=\s+R[oô]le\s*:|$)/i,
+    fullNameFromBody:
+      /Nom\s*:\s*([^\n#@]{1,120}?)(?=\s+R[oô]le\s*:|\s+[A-Z0-9._%+-]+@|$)/i,
     roleFromBody: /R[oô]le\s*:\s*([^\n#{}]{1,80})/i,
     photoFromItem: ['profileImg', 'assetUrl'],
     emailFromMailto: true
@@ -213,15 +214,15 @@
       return out;
     }
 
-    // Remove chrome so textContent is real copy, not CSS rules.
     doc
       .querySelectorAll('style, script, noscript, template, link, meta')
       .forEach(function (el) {
         el.remove();
       });
 
+    var mailto = null;
     if (RESPONSABLE_FIELDS.emailFromMailto) {
-      var mailto = doc.querySelector('a[href^="mailto:"], a[href^="MAILTO:"]');
+      mailto = doc.querySelector('a[href^="mailto:"], a[href^="MAILTO:"]');
       if (mailto) {
         var href = String(mailto.getAttribute('href') || '');
         var m = href.match(/^mailto:([^?&#]+)/i);
@@ -235,10 +236,9 @@
       if (src) out.profileImg = src;
     }
 
-    // Prefer Squarespace text blocks; fall back to remaining body text.
     var chunks = [];
     doc
-      .querySelectorAll('.sqs-html-content, [data-sqsp-text-block-content]')
+      .querySelectorAll('.sqs-html-content, [data-sqsp-text-block-content], p')
       .forEach(function (el) {
         var t = (el.textContent || '').replace(/\s+/g, ' ').trim();
         if (t) chunks.push(t);
@@ -255,17 +255,61 @@
       if (em) out.email = em[0];
     }
 
-    var nom = text.match(RESPONSABLE_FIELDS.fullNameFromBody);
-    if (nom) {
-      var name = nom[1]
+    function cleanNameCandidate(raw) {
+      var name = String(raw || '')
         .replace(/\([^)]*@[^)]*\)/g, '')
         .replace(out.email || '', '')
         .replace(/\(\s*\)/g, '')
+        .replace(/^Nom\s*:\s*/i, '')
         .trim()
         .replace(/[,\s]+$/g, '');
-      // Clamp — avoid swallowing CSS if a style tag slipped through.
-      if (name && name.length < 120 && name.indexOf('{') === -1) {
-        out.fullName = name;
+      if (!name || name.length > 80 || name.indexOf('{') !== -1) return null;
+      if (/@/.test(name)) return null;
+      // Don't treat a region slug/name as a person.
+      if (matchUrlId(name)) return null;
+      if (!/[a-zA-ZÀ-ÿ]/.test(name)) return null;
+      return name;
+    }
+
+    var nom = text.match(RESPONSABLE_FIELDS.fullNameFromBody);
+    if (nom) out.fullName = cleanNameCandidate(nom[1]);
+
+    // Mailto link label often holds the display name.
+    if (!out.fullName && mailto) {
+      out.fullName = cleanNameCandidate(mailto.textContent || '');
+    }
+
+    // First text chunk that looks like a person name (not Rôle / email-only).
+    if (!out.fullName) {
+      for (var i = 0; i < chunks.length; i++) {
+        var chunk = chunks[i];
+        if (/^R[oô]le\s*:/i.test(chunk)) continue;
+        if (/^Nom\s*:/i.test(chunk)) {
+          out.fullName = cleanNameCandidate(chunk);
+          if (out.fullName) break;
+          continue;
+        }
+        // "Alexis S. (email)" or plain name line
+        var withoutEmail = chunk
+          .replace(out.email || '', '')
+          .replace(/\([^)]*@[^)]*\)/g, '')
+          .trim();
+        out.fullName = cleanNameCandidate(withoutEmail);
+        if (out.fullName) break;
+      }
+    }
+
+    // Last resort: derive a readable name from the email local-part.
+    // alexis.s@… → "Alexis S"
+    if (!out.fullName && out.email) {
+      var local = String(out.email).split('@')[0] || '';
+      var parts = local.split(/[._-]+/).filter(Boolean);
+      if (parts.length) {
+        out.fullName = parts
+          .map(function (p) {
+            return p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
+          })
+          .join(' ');
       }
     }
 
@@ -275,7 +319,12 @@
         .replace(/#block-[\s\S]*$/i, '')
         .replace(/\{[\s\S]*$/g, '')
         .trim();
-      if (roleText && roleText.length < 80 && roleText.indexOf('{') === -1) {
+      if (
+        roleText &&
+        roleText.length < 80 &&
+        roleText.indexOf('{') === -1 &&
+        !matchUrlId(roleText)
+      ) {
         out.title = roleText;
       }
     }
@@ -299,19 +348,23 @@
     }
     if (!photo) photo = parsed.profileImg;
 
+    // Never use the Squarespace item title when it is just the region name
+    // (e.g. title "Laurentides" for urlId "laurentides").
+    var titleAsName =
+      item && item.title && !matchUrlId(item.title) ? String(item.title).trim() : '';
+
     return {
       fullName:
         parsed.fullName ||
         (item && item.fullName) ||
-        (item && item.title) ||
         (item && item.author && item.author.displayName) ||
+        titleAsName ||
         '',
       profileImg: photo || null,
       title:
         parsed.title ||
         (item && item.jobTitle) ||
         (item && item.subtitle) ||
-        (item && item.excerpt) ||
         null,
       email: parsed.email || (item && item.email) || null,
       body: null

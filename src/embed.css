@@ -526,7 +526,8 @@ body {
   font-style: italic;
 }
 
-/* Boxy black contact bubble (matches Région de Montréal inset language) */
+/* Boxy black contact bubble — size comes from Leaflet iconSize (map-aware JS);
+   type/padding use clamp so text stays readable across devices. */
 .qc-person-bubble-wrap {
   background: transparent !important;
   border: none !important;
@@ -538,10 +539,11 @@ body {
 
 .qc-person-bubble {
   position: relative;
-  width: max-content;
-  min-width: 280px;
-  max-width: 360px;
-  border: 3px solid #0a0a0a;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  border: clamp(2px, 0.35vmin, 3px) solid #0a0a0a;
   background: #fff;
   color: #0a0a0a;
   box-shadow: none;
@@ -556,11 +558,11 @@ body {
   align-items: baseline;
   justify-content: center;
   gap: 0.25rem;
-  padding: 0.35rem 0.5rem;
+  padding: clamp(0.3rem, 1.2vmin, 0.45rem) clamp(0.4rem, 1.5vmin, 0.65rem);
   background: #0a0a0a;
   color: #fff;
   font-family: Roboto, 'Source Sans 3', 'Segoe UI', system-ui, sans-serif;
-  font-size: 0.68rem;
+  font-size: clamp(0.62rem, 1.7vmin, 0.78rem);
   font-weight: 700;
   letter-spacing: 0.03em;
   text-transform: uppercase;
@@ -571,8 +573,9 @@ body {
 .qc-person-bubble__body {
   display: flex;
   align-items: stretch;
-  min-height: 112px;
+  min-height: 0;
   background: #eef8fa;
+  height: calc(100% - clamp(1.6rem, 4.5vmin, 2.1rem));
 }
 
 .qc-person-bubble__photo {
@@ -580,13 +583,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-right: 2px solid #0a0a0a;
+  border-right: clamp(1px, 0.3vmin, 2px) solid #0a0a0a;
   overflow: hidden;
-  /* Portrait-friendly slot; grows with the image’s aspect ratio (capped). */
-  width: auto;
-  min-width: 96px;
-  max-width: 150px;
-  height: 112px;
+  width: var(--qc-photo-w, 42%);
+  height: 100%;
   background: repeating-linear-gradient(
     -45deg,
     #d9e4ea,
@@ -598,15 +598,14 @@ body {
 
 .qc-person-bubble__photo-img {
   display: block;
+  width: 100%;
   height: 100%;
-  width: auto;
-  max-width: 150px;
   object-fit: contain;
   object-position: center top;
 }
 
 .qc-person-bubble__photo-ph {
-  font-size: 0.62rem;
+  font-size: clamp(0.55rem, 1.5vmin, 0.7rem);
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -617,34 +616,47 @@ body {
 .qc-person-bubble__meta {
   flex: 1 1 auto;
   min-width: 0;
-  padding: 0.5rem 0.65rem 0.55rem;
+  padding: clamp(0.45rem, 1.6vmin, 0.75rem) clamp(0.55rem, 2vmin, 0.85rem);
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: 0.2rem;
+  justify-content: center;
 }
 
 .qc-person-bubble--rich .qc-person-bubble__meta {
-  max-height: 148px;
+  max-height: none;
   overflow-y: auto;
+}
+
+/* Narrow map / phone: photo above text */
+.qc-person-bubble--stacked .qc-person-bubble__body {
+  flex-direction: column;
+}
+
+.qc-person-bubble--stacked .qc-person-bubble__photo {
+  width: 100%;
+  height: var(--qc-photo-h, 55%);
+  border-right: none;
+  border-bottom: clamp(1px, 0.3vmin, 2px) solid #0a0a0a;
 }
 
 .qc-person-bubble__name {
   font-family: Roboto, 'Source Sans 3', 'Segoe UI', system-ui, sans-serif;
-  font-size: 0.92rem;
+  font-size: clamp(0.8rem, 2.2vmin, 1.05rem);
   font-weight: 700;
-  line-height: 1.15;
+  line-height: 1.2;
 }
 
 .qc-person-bubble__role,
 .qc-person-bubble__org {
-  font-size: 0.72rem;
+  font-size: clamp(0.65rem, 1.8vmin, 0.8rem);
   color: #2d3748;
-  line-height: 1.25;
+  line-height: 1.3;
 }
 
 .qc-person-bubble__note {
   margin-top: 0.25rem;
-  font-size: 0.65rem;
+  font-size: clamp(0.6rem, 1.6vmin, 0.72rem);
   color: #718096;
   font-style: italic;
 }
@@ -653,12 +665,13 @@ body {
   color: #0b5cab;
   text-decoration: underline;
   font-style: normal;
-  word-break: break-all;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .qc-person-bubble__cms {
   margin-top: 0.35rem;
-  font-size: 0.68rem;
+  font-size: clamp(0.62rem, 1.7vmin, 0.75rem);
   color: #2d3748;
   line-height: 1.35;
   font-style: normal;
