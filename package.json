@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "build:embed": "node scripts/build-embed-snippet.mjs",
     "fetch:boundaries": "node scripts/fetch-boundaries.mjs"
   },
   "dependencies": {
