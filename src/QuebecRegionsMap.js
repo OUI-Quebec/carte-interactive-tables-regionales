@@ -531,9 +531,9 @@ export function mountQuebecRegionsMap(el, config) {
    * @param {{ regionId?: string }} [opts]
    */
   function computeContactCardLayout(target, opts = {}) {
-    // Match .qc-person-bubble (248px + border-box); height ≈ banner + body.
-    const BUBBLE_W = 248;
-    const BUBBLE_H = 120;
+    // Match .qc-person-bubble (wider when a photo is present).
+    const BUBBLE_W = opts.bubbleW ?? 320;
+    const BUBBLE_H = opts.bubbleH ?? 140;
     // Pull bases into the card so the black fill fuses with the 3px border.
     const INSET = 5;
     const size = map.getSize();
@@ -816,6 +816,17 @@ export function mountQuebecRegionsMap(el, config) {
     );
   }
 
+  /** Drop SQS CSS / junk that sometimes lands in contact text fields. */
+  function cleanContactText(value, maxLen = 100) {
+    if (value == null) return '';
+    const t = String(value).replace(/\s+/g, ' ').trim();
+    if (!t) return '';
+    if (t.includes('{') || t.includes('}') || /#block-/i.test(t)) return '';
+    if (/mix-blend-mode|sqs-html-content|--tweak-/i.test(t)) return '';
+    if (t.length > maxLen) return t.slice(0, maxLen).trim();
+    return t;
+  }
+
   function showPersonBubble(id, layer) {
     clearPersonBubble();
     const rid = padId(id);
@@ -830,25 +841,31 @@ export function mountQuebecRegionsMap(el, config) {
     const target = insetTarget || layer.getBounds().getCenter();
     personBubbleAnchor = { id: rid, target };
 
-    const fullName = contact?.fullName?.trim() || '';
-    const role = contact?.title?.trim() || '';
-    const email = contact?.email?.trim() || '';
-    const bodyHtml = contact?.body ? sanitizeHtml(contact.body) : '';
-    const photoInner = contact?.profileImg
-      ? `<img class="qc-person-bubble__photo-img" src="${escapeAttr(contact.profileImg)}" alt="" loading="lazy" />`
+    const fullName = cleanContactText(contact?.fullName, 80);
+    const role = cleanContactText(contact?.title, 60);
+    const email = cleanContactText(contact?.email, 120);
+    // Never dump raw SQS body into the bubble — only structured fields.
+    const photoUrl =
+      contact?.profileImg && String(contact.profileImg).trim()
+        ? String(contact.profileImg).trim()
+        : '';
+    const photoInner = photoUrl
+      ? `<img class="qc-person-bubble__photo-img" src="${escapeAttr(photoUrl)}" alt="" loading="lazy" />`
       : `<span class="qc-person-bubble__photo-ph">Photo</span>`;
     const emailBlock = email
       ? `<a class="qc-person-bubble__email" href="mailto:${escapeAttr(email)}">${escapeHtml(email)}</a>`
       : '';
-    const noteBlock = bodyHtml
-      ? `<div class="qc-person-bubble__cms">${bodyHtml}</div>`
-      : emailBlock
-        ? `<div class="qc-person-bubble__note">${emailBlock}</div>`
-        : '';
+    const noteBlock = emailBlock
+      ? `<div class="qc-person-bubble__note">${emailBlock}</div>`
+      : '';
 
-    const layoutCard = computeContactCardLayout(target, { regionId: rid });
+    const layoutCard = computeContactCardLayout(target, {
+      regionId: rid,
+      bubbleW: photoUrl ? 320 : 260,
+      bubbleH: 140
+    });
     const html = `
-      <div class="qc-person-bubble${bodyHtml ? ' qc-person-bubble--rich' : ''}" role="dialog" aria-label="Contact — ${escapeAttr(regionName)}">
+      <div class="qc-person-bubble" role="dialog" aria-label="Contact — ${escapeAttr(regionName)}">
         <div class="qc-person-bubble__banner">
           <span>${escapeHtml(regionName)}</span>
         </div>
@@ -864,7 +881,6 @@ export function mountQuebecRegionsMap(el, config) {
         </div>
       </div>`;
 
-    const iconH = bodyHtml ? 200 : 120;
     const marker = L.marker(layoutCard.cardLatLng, {
       interactive: false,
       keyboard: false,
@@ -872,7 +888,7 @@ export function mountQuebecRegionsMap(el, config) {
       icon: L.divIcon({
         className: 'qc-person-bubble-wrap',
         html,
-        iconSize: [248, iconH],
+        iconSize: [photoUrl ? 320 : 260, 140],
         iconAnchor: [0, 0]
       })
     });
@@ -1972,6 +1988,26 @@ export function mountQuebecRegionsMap(el, config) {
   if (sideBubble) {
     L.DomEvent.disableClickPropagation(sideBubble);
     L.DomEvent.disableScrollPropagation(sideBubble);
+    const legendToggle = sideBubble.querySelector('[data-legend-toggle]');
+    const legendList = sideBubble.querySelector('[data-legend-list]');
+    if (legendToggle) {
+      legendToggle.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const collapsed = !sideBubble.classList.contains('is-collapsed');
+        sideBubble.classList.toggle('is-collapsed', collapsed);
+        legendToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        legendToggle.setAttribute(
+          'aria-label',
+          collapsed ? 'Développer la légende' : 'Réduire la légende'
+        );
+        legendToggle.textContent = collapsed ? '+' : '−';
+        if (legendList) legendList.hidden = collapsed;
+        // Legend size affects contact-card placement insets.
+        if (selectedId) updatePersonBubble();
+        map.invalidateSize({ animate: false });
+      });
+    }
   }
   if (pubsPane) {
     L.DomEvent.disableClickPropagation(pubsPane);
@@ -2110,8 +2146,18 @@ function shellHtml(ui, visibleRegions) {
       ? ''
       : `<aside class="qc-map-bubble qc-map-bubble--legend" aria-label="Légende des régions" data-legend-bubble>
           <div class="qc-map-legend" data-legend-pane>
-            <div class="qc-map-legend-heading">Légende</div>
-            <ol class="qc-map-legend-list">
+            <div class="qc-map-legend__head">
+              <div class="qc-map-legend-heading">Légende</div>
+              <button
+                type="button"
+                class="qc-map-legend__toggle"
+                data-legend-toggle
+                aria-expanded="true"
+                aria-controls="qc-legend-list"
+                aria-label="Réduire la légende"
+              >−</button>
+            </div>
+            <ol class="qc-map-legend-list" id="qc-legend-list" data-legend-list>
               ${visibleRegions
                 .map((r) => {
                   const id = padId(r.id);

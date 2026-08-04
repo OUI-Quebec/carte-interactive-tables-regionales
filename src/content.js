@@ -194,6 +194,20 @@ export function normalizeContent(raw) {
         email: c.email != null && c.email !== '' ? String(c.email) : null,
         body: c.body != null ? String(c.body) : null
       };
+      // Drop SQS CSS that sometimes gets scraped into text fields.
+      const scrub = (s, max) => {
+        if (!s) return s;
+        const t = String(s).replace(/\s+/g, ' ').trim();
+        if (!t) return null;
+        if (t.includes('{') || t.includes('}') || /#block-/i.test(t)) return null;
+        if (/mix-blend-mode|sqs-html-content|--tweak-/i.test(t)) return null;
+        return t.length > max ? t.slice(0, max).trim() : t;
+      };
+      contacts[id].fullName = scrub(contacts[id].fullName, 80) || '';
+      contacts[id].title = scrub(contacts[id].title, 60);
+      contacts[id].email = scrub(contacts[id].email, 120);
+      // Never keep raw SQS layout HTML on contacts — bubble uses structured fields only.
+      contacts[id].body = null;
     }
   }
 
