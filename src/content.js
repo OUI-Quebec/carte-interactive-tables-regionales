@@ -204,7 +204,7 @@ export function normalizeContent(raw) {
         return t.length > max ? t.slice(0, max).trim() : t;
       };
       contacts[id].fullName = scrub(contacts[id].fullName, 80) || '';
-      contacts[id].title = scrub(contacts[id].title, 60);
+      contacts[id].title = scrub(contacts[id].title, 120);
       contacts[id].email = scrub(contacts[id].email, 120);
       // Never keep raw SQS layout HTML on contacts — bubble uses structured fields only.
       contacts[id].body = null;

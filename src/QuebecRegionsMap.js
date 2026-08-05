@@ -887,8 +887,21 @@ export function mountQuebecRegionsMap(el, config) {
     const target = insetTarget || layer.getBounds().getCenter();
     personBubbleAnchor = { id: rid, target };
 
-    const fullName = cleanContactText(contact?.fullName, 80);
-    const role = cleanContactText(contact?.title, 60);
+    // Never show the region label as the person's name (bad CMS fallback).
+    const fold = (s) =>
+      String(s || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '');
+    const fullNameRaw = cleanContactText(contact?.fullName, 80);
+    const fullName =
+      fullNameRaw &&
+      fold(fullNameRaw) !== fold(regionName) &&
+      fold(fullNameRaw) !== fold(cfg?.name || '')
+        ? fullNameRaw
+        : '';
+    const role = cleanContactText(contact?.title, 120);
     const email = cleanContactText(contact?.email, 120);
     // Never dump raw SQS body into the bubble — only structured fields.
     const photoUrl =

@@ -75,19 +75,26 @@
    * Squarespace item / body   →  contacts[regionId]
    * ---------------------------|------------------------
    * urlId / title             →  region key (via matchUrlId)
-   * body "Nom : …"            →  fullName
+   * body "Nom : …"            →  fullName (+ email if in parentheses)
    * body "Rôle : …"           →  title (role line)
+   * excerpt <strong>…</strong>→  fullName fallback
    * body mailto: / email text →  email
    * assetUrl / profileImg /   →  profileImg
    *   first <img> in body
+   *
+   * Example body lines:
+   *   Nom : Alexis St-Maurice (alexis.s@ouiquebec.org)
+   *   Rôle : Responsable à la mobilisation et au financement (niveau national)
    */
   var RESPONSABLE_FIELDS = {
     regionFrom: ['urlId', 'title'],
-    fullNameFromBody:
-      /Nom\s*:\s*([^\n#@]{1,120}?)(?=\s+R[oô]le\s*:|\s+[A-Z0-9._%+-]+@|$)/i,
-    roleFromBody: /R[oô]le\s*:\s*([^\n#{}]{1,80})/i,
+    /** Labelled line: "Nom :" … optional "(email)"; stop before Rôle if flattened */
+    fullNameFromBody: /Nom\s*:\s*(.+?)(?=\s*R[oô]le\s*:|$)/i,
+    roleFromBody: /R[oô]le\s*:\s*(.+?)(?=\s*Nom\s*:|$)/i,
     photoFromItem: ['profileImg', 'assetUrl'],
-    emailFromMailto: true
+    emailFromMailto: true,
+    maxNameLen: 80,
+    maxRoleLen: 120
   };
 
   // ---------------------------------------------------------------------------
@@ -171,6 +178,60 @@
     return matchUrlId(item && item.title) || matchUrlId(item && item.urlId);
   }
 
+  /**
+   * Squarespace JSON shows body as "\u003Cdiv…\u003E" in raw form.
+   * `fetch().json()` already turns those into real "<" / ">".
+   * This also covers double-encoded leftovers (literal backslash-u sequences)
+   * and common HTML entities before DOMParser / regex run.
+   */
+  function decodeSqspHtmlString(raw) {
+    if (raw == null) return '';
+    var s = String(raw);
+
+    // Literal \u003C / \u003E / \u0026 still in the string (not JSON-decoded).
+    if (/\\u[0-9a-fA-F]{4}/.test(s)) {
+      try {
+        // s already holds JSON-style escapes; wrap as a JSON string and parse.
+        s = JSON.parse(
+          '"' +
+            s
+              .replace(/"/g, '\\"')
+              .replace(/\r/g, '\\r')
+              .replace(/\n/g, '\\n')
+              .replace(/\t/g, '\\t') +
+            '"'
+        );
+      } catch (err1) {
+        s = s
+          .replace(/\\u003[cC]/g, '<')
+          .replace(/\\u003[eE]/g, '>')
+          .replace(/\\u0026/gi, '&')
+          .replace(/\\u00a0/gi, ' ')
+          .replace(/\\n/g, '\n')
+          .replace(/\\t/g, '\t')
+          .replace(/\\"/g, '"');
+      }
+    }
+
+    // Named / numeric HTML entities in text (&nbsp; é etc.).
+    if (/&[#a-zA-Z0-9]+;/.test(s)) {
+      try {
+        var ta =
+          global.document && global.document.createElement
+            ? global.document.createElement('textarea')
+            : null;
+        if (ta) {
+          ta.innerHTML = s;
+          s = ta.value;
+        }
+      } catch (err3) {
+        /* keep s */
+      }
+    }
+
+    return s;
+  }
+
   // ---------------------------------------------------------------------------
   // Region pages model
   // ---------------------------------------------------------------------------
@@ -189,7 +250,7 @@
       title: item[REGION_PAGE_FIELDS.title] || '',
       body:
         item[REGION_PAGE_FIELDS.body] != null
-          ? String(item[REGION_PAGE_FIELDS.body])
+          ? decodeSqspHtmlString(item[REGION_PAGE_FIELDS.body])
           : '',
       url: absoluteUrl(item[REGION_PAGE_FIELDS.url], siteOrigin)
     };
@@ -199,6 +260,88 @@
   // Responsables model
   // ---------------------------------------------------------------------------
 
+  function stripCssJunk(s) {
+    return String(s || '')
+      .replace(/#block-[\s\S]*$/i, '')
+      .replace(/\{[\s\S]*$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function looksLikeCssJunk(s) {
+    var t = String(s || '');
+    return (
+      !t ||
+      t.indexOf('{') !== -1 ||
+      t.indexOf('}') !== -1 ||
+      /#block-/i.test(t) ||
+      /mix-blend-mode|sqs-html-content|--tweak-/i.test(t)
+    );
+  }
+
+  /**
+   * Person display name — never a region label, email, or CSS scrap.
+   */
+  function cleanNameCandidate(raw, emailHint) {
+    var name = String(raw || '')
+      .replace(/\([^)]*@[^)]*\)/g, ' ')
+      .replace(emailHint || '', ' ')
+      .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, ' ')
+      .replace(/^Nom\s*:\s*/i, '')
+      .replace(/\(\s*\)/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/^[\s,;:–—-]+|[\s,;:–—-]+$/g, '');
+    if (!name || name.length > RESPONSABLE_FIELDS.maxNameLen) return null;
+    if (looksLikeCssJunk(name) || /@/.test(name)) return null;
+    // Don't treat a region slug/name as a person ("Laurentides", "Montréal").
+    if (matchUrlId(name)) return null;
+    if (!/[a-zA-ZÀ-ÿ]/.test(name)) return null;
+    // Require at least one letter sequence that isn't tiny junk.
+    if (name.length < 2) return null;
+    return name;
+  }
+
+  function cleanRoleCandidate(raw) {
+    var roleText = stripCssJunk(raw)
+      .replace(/^R[oô]le\s*:\s*/i, '')
+      .trim();
+    if (!roleText || roleText.length > RESPONSABLE_FIELDS.maxRoleLen) return null;
+    if (looksLikeCssJunk(roleText)) return null;
+    if (matchUrlId(roleText)) return null;
+    return roleText;
+  }
+
+  function emailFromText(text) {
+    var em = String(text || '').match(
+      /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i
+    );
+    return em ? em[0] : null;
+  }
+
+  /**
+   * Prefer the leading <strong>Name</strong> in the Squarespace excerpt.
+   */
+  function nameFromExcerpt(html) {
+    if (!html) return null;
+    var raw = decodeSqspHtmlString(html);
+    var strong = raw.match(/<strong[^>]*>\s*([^<]{2,80}?)\s*<\/strong>/i);
+    if (strong) {
+      var fromStrong = cleanNameCandidate(strong[1]);
+      if (fromStrong) return fromStrong;
+    }
+    // Plain-text excerpt fallback: first words before " est " / " is ".
+    var plain = raw
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    var beforeEst = plain.match(
+      /^([A-ZÀ-Ÿ][\wÀ-ÿ'’.-]+(?:\s+[A-ZÀ-Ÿ][\wÀ-ÿ'’.-]+){0,4})\s+est\b/i
+    );
+    if (beforeEst) return cleanNameCandidate(beforeEst[1]);
+    return null;
+  }
+
   /**
    * Pull Nom / Rôle / mailto / img out of Squarespace SQS body HTML.
    * Ignores <style>/<script> text (SQS injects CSS into the body string).
@@ -207,9 +350,11 @@
     var out = { fullName: null, title: null, email: null, profileImg: null };
     if (!html) return out;
 
+    var source = decodeSqspHtmlString(html);
+
     var doc;
     try {
-      doc = new DOMParser().parseFromString(String(html), 'text/html');
+      doc = new DOMParser().parseFromString(source, 'text/html');
     } catch (err) {
       return out;
     }
@@ -236,67 +381,59 @@
       if (src) out.profileImg = src;
     }
 
+    // Prefer labelled text blocks (one SQS text block per field).
     var chunks = [];
+    var seen = {};
     doc
-      .querySelectorAll('.sqs-html-content, [data-sqsp-text-block-content], p')
+      .querySelectorAll(
+        '.sqs-html-content, [data-sqsp-text-block-content], p, li'
+      )
       .forEach(function (el) {
         var t = (el.textContent || '').replace(/\s+/g, ' ').trim();
-        if (t) chunks.push(t);
+        if (!t || seen[t]) return;
+        seen[t] = true;
+        chunks.push(t);
       });
     var text =
       chunks.length > 0
-        ? chunks.join(' ')
+        ? chunks.join('\n')
         : ((doc.body && (doc.body.textContent || doc.body.innerText)) || '')
             .replace(/\s+/g, ' ')
             .trim();
 
-    if (!out.email) {
-      var em = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
-      if (em) out.email = em[0];
+    if (!out.email) out.email = emailFromText(text);
+
+    // --- Nom / Rôle from labelled lines (handles "Nom : Name (email@…)") ---
+    var i;
+    for (i = 0; i < chunks.length; i++) {
+      var chunk = chunks[i];
+      var nomLine = chunk.match(RESPONSABLE_FIELDS.fullNameFromBody);
+      if (nomLine && !out.fullName) {
+        if (!out.email) out.email = emailFromText(nomLine[1]) || out.email;
+        out.fullName = cleanNameCandidate(nomLine[1], out.email);
+      }
+      var roleLine = chunk.match(RESPONSABLE_FIELDS.roleFromBody);
+      if (roleLine && !out.title) {
+        out.title = cleanRoleCandidate(roleLine[1]);
+      }
     }
 
-    function cleanNameCandidate(raw) {
-      var name = String(raw || '')
-        .replace(/\([^)]*@[^)]*\)/g, '')
-        .replace(out.email || '', '')
-        .replace(/\(\s*\)/g, '')
-        .replace(/^Nom\s*:\s*/i, '')
-        .trim()
-        .replace(/[,\s]+$/g, '');
-      if (!name || name.length > 80 || name.indexOf('{') !== -1) return null;
-      if (/@/.test(name)) return null;
-      // Don't treat a region slug/name as a person.
-      if (matchUrlId(name)) return null;
-      if (!/[a-zA-ZÀ-ÿ]/.test(name)) return null;
-      return name;
+    // Whole-body fallback if chunks missed labels (flattened HTML).
+    if (!out.fullName) {
+      var nom = text.match(RESPONSABLE_FIELDS.fullNameFromBody);
+      if (nom) {
+        if (!out.email) out.email = emailFromText(nom[1]) || out.email;
+        out.fullName = cleanNameCandidate(nom[1], out.email);
+      }
     }
-
-    var nom = text.match(RESPONSABLE_FIELDS.fullNameFromBody);
-    if (nom) out.fullName = cleanNameCandidate(nom[1]);
+    if (!out.title) {
+      var role = text.match(RESPONSABLE_FIELDS.roleFromBody);
+      if (role) out.title = cleanRoleCandidate(role[1]);
+    }
 
     // Mailto link label often holds the display name.
     if (!out.fullName && mailto) {
-      out.fullName = cleanNameCandidate(mailto.textContent || '');
-    }
-
-    // First text chunk that looks like a person name (not Rôle / email-only).
-    if (!out.fullName) {
-      for (var i = 0; i < chunks.length; i++) {
-        var chunk = chunks[i];
-        if (/^R[oô]le\s*:/i.test(chunk)) continue;
-        if (/^Nom\s*:/i.test(chunk)) {
-          out.fullName = cleanNameCandidate(chunk);
-          if (out.fullName) break;
-          continue;
-        }
-        // "Alexis S. (email)" or plain name line
-        var withoutEmail = chunk
-          .replace(out.email || '', '')
-          .replace(/\([^)]*@[^)]*\)/g, '')
-          .trim();
-        out.fullName = cleanNameCandidate(withoutEmail);
-        if (out.fullName) break;
-      }
+      out.fullName = cleanNameCandidate(mailto.textContent || '', out.email);
     }
 
     // Last resort: derive a readable name from the email local-part.
@@ -310,22 +447,6 @@
             return p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
           })
           .join(' ');
-      }
-    }
-
-    var role = text.match(RESPONSABLE_FIELDS.roleFromBody);
-    if (role) {
-      var roleText = role[1]
-        .replace(/#block-[\s\S]*$/i, '')
-        .replace(/\{[\s\S]*$/g, '')
-        .trim();
-      if (
-        roleText &&
-        roleText.length < 80 &&
-        roleText.indexOf('{') === -1 &&
-        !matchUrlId(roleText)
-      ) {
-        out.title = roleText;
       }
     }
 
@@ -348,23 +469,26 @@
     }
     if (!photo) photo = parsed.profileImg;
 
-    // Never use the Squarespace item title when it is just the region name
-    // (e.g. title "Laurentides" for urlId "laurentides").
-    var titleAsName =
-      item && item.title && !matchUrlId(item.title) ? String(item.title).trim() : '';
+    var excerptName = nameFromExcerpt(item && item.excerpt);
+    var authorName =
+      item && item.author && item.author.displayName
+        ? cleanNameCandidate(item.author.displayName)
+        : null;
+    var itemFullName =
+      item && item.fullName ? cleanNameCandidate(item.fullName) : null;
+
+    // Never use the Squarespace item title — it is almost always the region
+    // name (e.g. "Laurentides", "Montréal") for these collection items.
+    var fullName =
+      parsed.fullName || excerptName || itemFullName || authorName || '';
 
     return {
-      fullName:
-        parsed.fullName ||
-        (item && item.fullName) ||
-        (item && item.author && item.author.displayName) ||
-        titleAsName ||
-        '',
+      fullName: fullName,
       profileImg: photo || null,
       title:
         parsed.title ||
-        (item && item.jobTitle) ||
-        (item && item.subtitle) ||
+        (item && item.jobTitle ? cleanRoleCandidate(item.jobTitle) : null) ||
+        (item && item.subtitle ? cleanRoleCandidate(item.subtitle) : null) ||
         null,
       email: parsed.email || (item && item.email) || null,
       body: null
@@ -413,6 +537,7 @@
     mapRegionPage: mapRegionPage,
     mapResponsable: mapResponsable,
     parseResponsableBody: parseResponsableBody,
+    decodeSqspHtmlString: decodeSqspHtmlString,
     collectionItems: collectionItems,
     buildContent: buildContent
   };
