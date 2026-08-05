@@ -794,11 +794,22 @@ export function mountQuebecRegionsMap(el, config) {
     }
   }
 
+  function regionPageBodyHtml(rid) {
+    const page = cmsContent.regionPages?.[rid];
+    if (!page?.body) return '';
+    const html = sanitizeHtml(page.body);
+    // Ignore SQS chrome that survives as empty wrappers with no real text/media.
+    const text = html
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (text || /<img\s/i.test(html)) return html;
+    return '';
+  }
+
   function hasRegionPanelContent(rid) {
     if (!rid) return false;
-    const page = cmsContent.regionPages?.[rid];
-    const body = page?.body != null ? String(page.body).trim() : '';
-    if (body) return true;
+    if (regionPageBodyHtml(rid)) return true;
     const pubs = pubsByRegion.get(rid) ?? [];
     return pubs.length > 0;
   }
@@ -1055,8 +1066,7 @@ export function mountQuebecRegionsMap(el, config) {
       pubsRegionEl.textContent = name;
     }
 
-    const page = cmsContent.regionPages?.[selectedId] ?? null;
-    const bodyHtml = page?.body ? sanitizeHtml(page.body) : '';
+    const bodyHtml = regionPageBodyHtml(selectedId);
 
     if (pubsBodyEl) {
       if (bodyHtml) {
