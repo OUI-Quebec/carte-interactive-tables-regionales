@@ -6,3 +6,5 @@ Thumbs.db
 *.local
 *.log
 .vite/
+
+**/node_modules/
