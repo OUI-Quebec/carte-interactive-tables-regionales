@@ -189,6 +189,11 @@ export function mountQuebecRegionsMap(el, config) {
 
     let lastY = 0;
     let active = false;
+    // Coalesce a burst of wheel/touch events into one message per frame —
+    // one postMessage + one scroll write per frame instead of per event.
+    let queuedDy = 0;
+    let queuedSmooth = true;
+    let flushRaf = 0;
 
     const touchIsOutsideMap = (target, touch) => {
       if (target instanceof Element && target.closest('.qc-map-stage')) {
@@ -203,15 +208,36 @@ export function mountQuebecRegionsMap(el, config) {
       return true;
     };
 
-    const scrollParentBy = (dy) => {
-      if (!dy || !Number.isFinite(dy)) return;
-      window.parent.postMessage({ type: 'quebec-map:scrollBy', dy }, '*');
+    const flushScroll = () => {
+      flushRaf = 0;
+      const dy = queuedDy;
+      queuedDy = 0;
+      if (!dy) return;
+      window.parent.postMessage(
+        { type: 'quebec-map:scrollBy', dy, smooth: queuedSmooth },
+        '*'
+      );
     };
 
-    /** Normalize wheel delta to approximate CSS pixels. */
+    /**
+     * @param {number} dy
+     * @param {boolean} smooth Wheel gets eased by the host; touch tracks 1:1.
+     */
+    const scrollParentBy = (dy, smooth) => {
+      if (!dy || !Number.isFinite(dy)) return;
+      queuedDy += dy;
+      queuedSmooth = smooth;
+      if (!flushRaf) flushRaf = requestAnimationFrame(flushScroll);
+    };
+
+    /**
+     * Normalize wheel delta to approximate CSS pixels.
+     * 40px/line matches what browsers actually scroll per notch — the old
+     * 16px made Firefox (deltaMode=1, 3 lines/notch) crawl.
+     */
     const wheelDeltaY = (e) => {
       let dy = e.deltaY;
-      if (e.deltaMode === 1) dy *= 16; // lines → px
+      if (e.deltaMode === 1) dy *= 40; // lines → px
       if (e.deltaMode === 2) dy *= window.innerHeight || 800; // pages
       return dy;
     };
@@ -260,7 +286,7 @@ export function mountQuebecRegionsMap(el, config) {
       lastY = y;
       if (dy === 0) return;
       e.preventDefault();
-      scrollParentBy(dy);
+      scrollParentBy(dy, false);
     };
 
     const end = () => {
@@ -273,7 +299,7 @@ export function mountQuebecRegionsMap(el, config) {
       if (!dy) return;
       e.preventDefault();
       e.stopPropagation();
-      scrollParentBy(dy);
+      scrollParentBy(dy, true);
     };
 
     document.addEventListener('touchstart', onTouchStart, {
@@ -294,6 +320,92 @@ export function mountQuebecRegionsMap(el, config) {
       passive: false,
       capture: true
     });
+  }
+
+  const toastEl = el.querySelector('[data-toast]');
+  let toastTimer = 0;
+
+  /** Transient confirmation over the map (used by the email copy). */
+  function showToast(message) {
+    if (!toastEl) return;
+    toastEl.textContent = message;
+    toastEl.hidden = false;
+    // Restart the fade even on back-to-back copies.
+    toastEl.classList.remove('is-visible');
+    void toastEl.offsetWidth;
+    toastEl.classList.add('is-visible');
+    window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => {
+      toastEl.classList.remove('is-visible');
+      toastEl.hidden = true;
+    }, 2200);
+  }
+
+  /** Selection + execCommand: works where the async Clipboard API is blocked. */
+  function legacyCopy(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText =
+      'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch {
+      ok = false;
+    }
+    ta.remove();
+    return ok;
+  }
+
+  async function copyToClipboard(text) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch {
+      // Cross-origin iframe without allow="clipboard-write" — fall back.
+    }
+    return legacyCopy(text);
+  }
+
+  /**
+   * Clicking a mailto: link (contact bubble, CMS body) copies the address
+   * instead of firing up a mail client. Capture phase so Leaflet never sees
+   * the click as a map click that would clear the selection.
+   */
+  function setupEmailCopy() {
+    el.addEventListener(
+      'click',
+      (e) => {
+        // Leave modified clicks (new tab, mail client) to the browser.
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        const link =
+          e.target instanceof Element
+            ? e.target.closest('a[href^="mailto:"]')
+            : null;
+        if (!link) return;
+        const raw = link.getAttribute('href').slice(7).split('?')[0];
+        let email = raw;
+        try {
+          email = decodeURIComponent(raw);
+        } catch {
+          email = raw;
+        }
+        email = email.trim();
+        if (!email) return;
+        e.preventDefault();
+        e.stopPropagation();
+        copyToClipboard(email).then((ok) => {
+          showToast(ok ? `Courriel copié : ${email}` : `Copie impossible — ${email}`);
+        });
+      },
+      true
+    );
   }
 
   /** On-map name labels for large peripheral regions (from maps-test). */
@@ -919,8 +1031,9 @@ export function mountQuebecRegionsMap(el, config) {
       contact?.profileImg && String(contact.profileImg).trim()
         ? String(contact.profileImg).trim()
         : '';
+    // Click copies instead of opening a mail client (see setupEmailCopy).
     const emailBlock = email
-      ? `<a class="qc-person-bubble__email" href="mailto:${escapeAttr(email)}">${escapeHtml(email)}</a>`
+      ? `<a class="qc-person-bubble__email" href="mailto:${escapeAttr(email)}" title="Cliquer pour copier l’adresse">${escapeHtml(email)}</a>`
       : '';
     const noteBlock = emailBlock
       ? `<div class="qc-person-bubble__note">${emailBlock}</div>`
@@ -2177,6 +2290,7 @@ export function mountQuebecRegionsMap(el, config) {
   applyZoomMode();
   syncMobileChrome();
   setupParentScrollBridge();
+  setupEmailCopy();
 
   requestAnimationFrame(() => {
     map.invalidateSize();
@@ -2188,6 +2302,7 @@ export function mountQuebecRegionsMap(el, config) {
     destroy() {
       destroyed = true;
       window.clearTimeout(heightNotifyTimer);
+      window.clearTimeout(toastTimer);
       clearPersonBubble();
       if (regionLabelGroup) {
         map.removeLayer(regionLabelGroup);
@@ -2297,6 +2412,7 @@ function shellHtml(ui, visibleRegions) {
             />
           </div>
         </div>
+        <div class="qc-map-toast" data-toast role="status" aria-live="polite" hidden></div>
       </div>
       ${pubsDrawer}
     </div>

@@ -59,7 +59,7 @@ function readEmbed(name) {
 }
 
 const src = arg('src', DEFAULT_SRC);
-const height = arg('height', '720');
+const height = arg('height', '600');
 const version = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
   .version;
 const stamp = gitStamp();
@@ -75,6 +75,7 @@ const snippet = `<!--
   src="${src}"
   title="Carte des régions administratives du Québec"
   style="width:100%;height:${height}px;border:0;display:block;"
+  allow="clipboard-write"
   data-qc-region-pages="/carte-tables-regionales"
   data-qc-contacts="/carte-tables-rgionales-responsables"
   data-qc-contact-region-from="urlId"

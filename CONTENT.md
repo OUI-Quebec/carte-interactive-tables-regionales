@@ -28,7 +28,7 @@ Load **content-models.js before** the bridge:
   id="qc-map"
   src="https://ORG.github.io/REPO/"
   title="Carte des régions administratives du Québec"
-  style="width:100%;height:720px;border:0;display:block;"
+  style="width:100%;height:600px;border:0;display:block;"
   data-qc-region-pages="/carte-tables-regionales"
   data-qc-contacts="/carte-tables-rgionales-responsables"
   data-qc-contact-region-from="urlId"
