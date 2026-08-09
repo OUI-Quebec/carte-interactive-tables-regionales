@@ -60,7 +60,7 @@
     { "id": "08", "name": "Abitibi-Témiscamingue", "shortName": "Abitibi-Témiscamingue", "color": "#C5A3D9", "visible": true },
     { "id": "09", "name": "Côte-Nord", "color": "#A9D08E", "visible": true },
     { "id": "10", "name": "Nord-du-Québec", "color": "#9DC3E6", "visible": true },
-    { "id": "11", "name": "Gaspésie–Îles-de-la-Madeleine", "shortName": "Gaspésie–Îles-de-la-Madeleine", "color": "#FFE699", "visible": true },
+    { "id": "11", "name": "Gaspésie–Îles-de-la-Madeleine", "color": "#FFE699", "visible": true },
     { "id": "12", "name": "Chaudière-Appalaches", "shortName": "Chaudière-Appalaches", "color": "#F4B183", "visible": true },
     { "id": "13", "name": "Laval", "color": "#2F5496", "visible": true },
     { "id": "14", "name": "Lanaudière", "color": "#C45911", "visible": true },

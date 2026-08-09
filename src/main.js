@@ -15,7 +15,7 @@ const MSG_READY = 'quebec-map:ready';
  *
  * CMS content arrives via postMessage (`quebec-map:setContent`) from the
  * Squarespace bridge (publications + responsables), optional config.content,
- * or ?demoContent=1. Partial payloads merge.
+ * or — in `npm run dev` only — loadDevContent() below. Partial payloads merge.
  */
 async function resolveConfig() {
   if (window.__QUEBEC_MAP_CONFIG__) {
@@ -43,6 +43,60 @@ function originAllowed(origin, allowed) {
   return allowed.includes('*') || allowed.includes(origin);
 }
 
+/** Load a classic (non-module) script and resolve once it has run. */
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const el = document.createElement('script');
+    el.src = src;
+    el.onload = () => resolve();
+    el.onerror = () => reject(new Error(`Script load failed: ${src}`));
+    document.head.appendChild(el);
+  });
+}
+
+/**
+ * Dev-only stand-in for the Squarespace bridge.
+ *
+ * Standalone there is no parent frame to postMessage content in, so the map
+ * stays empty and clicking a region shows nothing. Rather than fixtures, this
+ * replays what the bridge does — fetch both collections as JSON, run them
+ * through the shared content-models.js — against the live site. The Vite dev
+ * proxy makes those paths same-origin (see vite.config.js).
+ *
+ * Stripped from production builds: `import.meta.env.DEV` is false there.
+ * @param {{ setContent: (content: object) => void }} api
+ */
+async function loadDevContent(api) {
+  await loadScript(resolvePublicUrl('embed/content-models.js'));
+  const models = window.QuebecMapContentModels;
+  if (!models) throw new Error('QuebecMapContentModels missing');
+
+  const paths = models.COLLECTION_PATHS;
+  const fetchCollection = async (path) => {
+    const res = await fetch(`${path}?format=json`, { headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error(`${res.status} on ${path}`);
+    return res.json();
+  };
+  const [regionPages, contacts] = await Promise.all([
+    fetchCollection(paths.regionPages),
+    fetchCollection(paths.responsables)
+  ]);
+
+  // The proxy hides the real origin, so page URLs must be rebuilt against it.
+  const siteOrigin = new URL(
+    regionPages?.website?.baseUrl || contacts?.website?.baseUrl || window.location.origin
+  ).origin;
+  const content = models.buildContent(regionPages, contacts, {
+    siteOrigin,
+    contactRegionFrom: 'urlId'
+  });
+  api.setContent(content);
+  console.info(
+    `[dev] Squarespace content: ${Object.keys(content.contacts).length} contacts, ` +
+      `${Object.keys(content.regionPages).length} pages régionales (${siteOrigin})`
+  );
+}
+
 async function boot() {
   const root = document.getElementById('root');
   try {
@@ -59,15 +113,17 @@ async function boot() {
     }
 
     const params = new URLSearchParams(window.location.search);
-    if (params.get('demoContent') === '1') {
-      try {
-        const demoRes = await fetch(resolvePublicUrl('config/demo-content.json'));
-        if (demoRes.ok) {
-          api.setContent(await demoRes.json());
-        }
-      } catch (err) {
-        console.warn('demoContent load failed', err);
-      }
+    // Standalone dev: no bridge to feed us, so pull the collections ourselves.
+    // Skipped inside an iframe — the host is authoritative there.
+    const embedded = window.parent && window.parent !== window;
+    if (import.meta.env.DEV && !embedded && params.get('devContent') !== '0') {
+      loadDevContent(api).catch((err) => {
+        console.warn(
+          '[dev] Squarespace content unavailable — check the /carte-tables- proxy ' +
+            'in vite.config.js (VITE_SQSP_ORIGIN to point elsewhere).',
+          err
+        );
+      });
     }
 
     const allowed = parseAllowedOrigins();

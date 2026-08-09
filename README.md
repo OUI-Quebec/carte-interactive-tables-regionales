@@ -14,10 +14,19 @@ npm run fetch:boundaries
 npm run dev
 ```
 
-Local demo with sample contacts + publications:
+`npm run dev` loads the **live Squarespace content** (contacts + region pages),
+so clicking a region shows the real popup. Standalone there is no bridge to
+postMessage it in, so the dev server proxies both collections same-origin and
+`main.js` runs them through the same `content-models.js` the bridge uses.
+
+Point it at another site, or opt out:
+
+```bash
+VITE_SQSP_ORIGIN=https://staging.example.com npm run dev
+```
 
 ```text
-http://localhost:5173/?demoContent=1
+http://localhost:5173/?devContent=0    # empty map, no popups
 ```
 
 Build for GitHub Pages:
