@@ -242,20 +242,30 @@ export function mountQuebecRegionsMap(el, config) {
       return dy;
     };
 
-    /** True when the floating pubs drawer should consume this wheel itself. */
-    const pubsConsumesWheel = (e) => {
+    /**
+     * True when a floating panel under the cursor should keep this wheel
+     * instead of forwarding it to the host — the pubs drawer, or the legend
+     * when it is tall enough to have its own scrollbar. Without this the
+     * legend shows a scrollbar it cannot scroll with the wheel.
+     */
+    const panelConsumesWheel = (e) => {
       if (isMobileViewport()) return false;
-      const pubs =
-        e.target instanceof Element
-          ? e.target.closest('[data-pubs-drawer]')
-          : null;
-      if (!pubs?.classList.contains('is-open')) return false;
-      if (pubs.scrollHeight <= pubs.clientHeight + 1) return false;
+      if (!(e.target instanceof Element)) return false;
+      const panel = e.target.closest('[data-pubs-drawer], [data-legend-bubble]');
+      if (!panel) return false;
+      // The drawer only scrolls while it is open.
+      if (
+        panel.matches('[data-pubs-drawer]') &&
+        !panel.classList.contains('is-open')
+      ) {
+        return false;
+      }
+      if (panel.scrollHeight <= panel.clientHeight + 1) return false;
       const delta = e.deltaY;
-      if (delta < 0 && pubs.scrollTop <= 0) return false;
+      if (delta < 0 && panel.scrollTop <= 0) return false;
       if (
         delta > 0 &&
-        pubs.scrollTop + pubs.clientHeight >= pubs.scrollHeight - 1
+        panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 1
       ) {
         return false;
       }
@@ -294,7 +304,7 @@ export function mountQuebecRegionsMap(el, config) {
     };
 
     const onWheel = (e) => {
-      if (pubsConsumesWheel(e)) return;
+      if (panelConsumesWheel(e)) return;
       const dy = wheelDeltaY(e);
       if (!dy) return;
       e.preventDefault();

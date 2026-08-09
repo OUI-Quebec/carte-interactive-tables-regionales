@@ -29,6 +29,19 @@ VITE_SQSP_ORIGIN=https://staging.example.com npm run dev
 http://localhost:5173/?devContent=0    # empty map, no popups
 ```
 
+Standalone dev runs the map **without a parent frame**, so the bridge, the
+scroll forwarding and the auto-height never run. To exercise the embed the way
+Squarespace does:
+
+```text
+http://localhost:5173/dev/squarespace-host.html
+```
+
+[`dev/squarespace-host.html`](dev/squarespace-host.html) mounts the local map in
+an iframe inside a Squarespace-like wrapper chain, with `scroll-behavior:
+smooth` on `<html>` as the live site has it. **Test scroll changes there** — that
+one CSS rule is what makes naive `scrollTop` writes crawl (see below).
+
 Build for GitHub Pages:
 
 ```bash
@@ -126,6 +139,13 @@ Wheel / touch over the map is forwarded to the host via `quebec-map:scrollBy`.
 The bridge caches the host's real scroller and eases wheel deltas over a few
 frames; tune the distance with `data-qc-scroll-speed="1.25"` on the iframe (or
 `scrollSpeed` in `mount()`).
+
+**Do not scroll the host with `scrollTop = …` or `window.scrollBy`.** Squarespace
+sets `scroll-behavior: smooth` on `<html>`, which turns every programmatic
+scroll into an eased animation; writing once per frame keeps restarting it and
+the page barely moves (measured on the live page: 400px asked for, 66px
+applied). The bridge uses `scrollTo({ behavior: 'instant' })` and supplies its
+own easing.
 
 Clicking an email address in the map copies it to the clipboard instead of
 opening a mail client — keep `allow="clipboard-write"` on the iframe (without

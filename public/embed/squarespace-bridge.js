@@ -70,11 +70,32 @@
       return node.scrollHeight > node.clientHeight + 1;
     }
 
-    /** Write the delta and report whether the node actually moved. */
+    /**
+     * Write the delta and report whether the node actually moved.
+     *
+     * Must bypass CSS `scroll-behavior: smooth` — Squarespace sets it on
+     * <html>, and under it every `scrollTop = …` starts a fresh eased
+     * animation from wherever the page currently is. Writing once per frame
+     * then keeps restarting that animation, and the page crawls: 400px asked
+     * for lands ~66px. `behavior: 'instant'` scrolls now, and our own rAF
+     * easing supplies the smoothness.
+     */
     function applyTo(node, amount) {
       if (!node) return false;
       var prev = node.scrollTop;
-      node.scrollTop = prev + amount;
+      if (typeof node.scrollTo === 'function') {
+        try {
+          node.scrollTo({ top: prev + amount, left: node.scrollLeft, behavior: 'instant' });
+        } catch (err) {
+          node.scrollTop = prev + amount;
+        }
+      } else {
+        node.scrollTop = prev + amount;
+      }
+      if (node.scrollTop === prev && amount) {
+        // Options form ignored (older engine) — plain write as a last resort.
+        node.scrollTop = prev + amount;
+      }
       return node.scrollTop !== prev;
     }
 
