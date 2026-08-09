@@ -87,16 +87,29 @@ The SQS `body` is parsed for structured fields (not shown raw):
 | In body / item | Becomes |
 |----------------|---------|
 | `Nom : …` | `fullName` |
-| `Rôle : …` | `title` (role line) |
-| `mailto:` link (or email in text) | `email` |
+| `Rôle : …` *(or `Note : …`)* | `title` (role line) — both labels feed the same line |
+| **`Courriel : …`** | `email` — **preferred**, wins over the row below |
+| `mailto:` link, or any address in the text | `email` fallback |
 | Item thumbnail (`assetUrl`) or `<img>` in body | `profileImg` |
 
-Example body text:
+Example body text — one text block per line:
 
 ```text
-Nom : Geneviève Nadeau (genevieve@…)
+Nom : Geneviève Nadeau
 Rôle : Responsable
+Courriel : genevieve@…
 ```
+
+Notes on `Courriel :`
+
+- Squarespace usually auto-linkifies the address into its own block, leaving a
+  bare `Courriel :` label. That is fine — the address is read from the block
+  right after the label.
+- Use it whenever a body holds more than one address (a generic *Nous joindre*
+  `mailto:`, an address inside the role text): the labelled line is the one that
+  reaches the contact bubble.
+- The older `Nom : Geneviève Nadeau (genevieve@…)` form still works, so existing
+  items keep their email until they are rewritten.
 
 The contact bubble shows photo + name + role + email link.
 

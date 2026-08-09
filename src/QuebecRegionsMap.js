@@ -912,7 +912,7 @@ export function mountQuebecRegionsMap(el, config) {
       fold(fullNameRaw) !== fold(cfg?.name || '')
         ? fullNameRaw
         : '';
-    const role = cleanContactText(contact?.title, 120);
+    const role = cleanContactText(contact?.title, Infinity);
     const email = cleanContactText(contact?.email, 120);
     // Never dump raw SQS body into the bubble — only structured fields.
     const photoUrl =

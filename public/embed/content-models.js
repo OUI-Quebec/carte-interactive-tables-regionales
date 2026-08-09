@@ -75,26 +75,33 @@
    * Squarespace item / body   →  contacts[regionId]
    * ---------------------------|------------------------
    * urlId / title             →  region key (via matchUrlId)
-   * body "Nom : …"            →  fullName (+ email if in parentheses)
-   * body "Rôle : …"           →  title (role line)
+   * body "Nom : …"            →  fullName
+   * body "Rôle : …" / "Note :"→  title (role line)
+   * body "Courriel : …"       →  email (wins over the sources below)
    * excerpt <strong>…</strong>→  fullName fallback
-   * body mailto: / email text →  email
+   * body mailto: / email text →  email fallback (incl. "Nom : … (email)")
    * assetUrl / profileImg /   →  profileImg
    *   first <img> in body
    *
    * Example body lines:
-   *   Nom : Alexis St-Maurice (alexis.s@ouiquebec.org)
+   *   Nom : Alexis St-Maurice
    *   Rôle : Responsable à la mobilisation et au financement (niveau national)
+   *   Courriel : alexis.s@ouiquebec.org
    */
   var RESPONSABLE_FIELDS = {
     regionFrom: ['urlId', 'title'],
-    /** Labelled line: "Nom :" … optional "(email)"; stop before Rôle if flattened */
-    fullNameFromBody: /Nom\s*:\s*(.+?)(?=\s*R[oô]le\s*:|$)/i,
-    roleFromBody: /R[oô]le\s*:\s*(.+?)(?=\s*Nom\s*:|$)/i,
+    // Each labelled line stops at the next label, so a flattened body (all three
+    // on one line) still splits cleanly. "Note :" is an accepted spelling of
+    // "Rôle :" — both feed the same role line in the bubble.
+    fullNameFromBody: /Nom\s*:\s*(.+?)(?=\s*(?:R[oô]le|Note|Courriel)\s*:|$)/i,
+    roleFromBody: /(?:R[oô]le|Note)\s*:\s*(.+?)(?=\s*(?:Nom|Courriel)\s*:|$)/i,
+    /** Dedicated address line — preferred over any mailto / loose address. */
+    emailFromBody: /Courriel\s*:\s*(.+?)(?=\s*(?:Nom|R[oô]le|Note)\s*:|$)/i,
     photoFromItem: ['profileImg', 'assetUrl'],
     emailFromMailto: true,
-    maxNameLen: 80,
-    maxRoleLen: 120
+    // No cap on the role line: "Note :" carries free-form text (table status,
+    // who to contact) that a length limit would drop or cut mid-sentence.
+    maxNameLen: 80
   };
 
   // ---------------------------------------------------------------------------
@@ -304,9 +311,9 @@
 
   function cleanRoleCandidate(raw) {
     var roleText = stripCssJunk(raw)
-      .replace(/^R[oô]le\s*:\s*/i, '')
+      .replace(/^(?:R[oô]le|Note)\s*:\s*/i, '')
       .trim();
-    if (!roleText || roleText.length > RESPONSABLE_FIELDS.maxRoleLen) return null;
+    if (!roleText) return null;
     if (looksLikeCssJunk(roleText)) return null;
     if (matchUrlId(roleText)) return null;
     return roleText;
@@ -400,6 +407,22 @@
         : ((doc.body && (doc.body.textContent || doc.body.innerText)) || '')
             .replace(/\s+/g, ' ')
             .trim();
+
+    // --- Courriel: the declared line beats a mailto link or a loose address ---
+    var labelled = null;
+    var j;
+    for (j = 0; j < chunks.length && !labelled; j++) {
+      var mailLine = chunks[j].match(RESPONSABLE_FIELDS.emailFromBody);
+      if (!mailLine) continue;
+      // Squarespace often auto-linkifies the address into its own block, which
+      // leaves a bare "Courriel :" label — then the address is the next chunk.
+      labelled = emailFromText(mailLine[1]) || emailFromText(chunks[j + 1]);
+    }
+    if (!labelled) {
+      var wholeMail = text.match(RESPONSABLE_FIELDS.emailFromBody);
+      if (wholeMail) labelled = emailFromText(wholeMail[1]);
+    }
+    if (labelled) out.email = labelled;
 
     if (!out.email) out.email = emailFromText(text);
 
