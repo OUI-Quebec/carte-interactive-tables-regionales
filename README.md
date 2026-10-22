@@ -14,11 +14,33 @@ npm run fetch:boundaries
 npm run dev
 ```
 
-Local demo with sample contacts + publications:
+`npm run dev` loads the **live Squarespace content** (contacts + region pages),
+so clicking a region shows the real popup. Standalone there is no bridge to
+postMessage it in, so the dev server proxies both collections same-origin and
+`main.js` runs them through the same `content-models.js` the bridge uses.
+
+Point it at another site, or opt out:
+
+```bash
+VITE_SQSP_ORIGIN=https://staging.example.com npm run dev
+```
 
 ```text
-http://localhost:5173/?demoContent=1
+http://localhost:5173/?devContent=0    # empty map, no popups
 ```
+
+Standalone dev runs the map **without a parent frame**, so the bridge, the
+scroll forwarding and the auto-height never run. To exercise the embed the way
+Squarespace does:
+
+```text
+http://localhost:5173/dev/squarespace-host.html
+```
+
+[`dev/squarespace-host.html`](dev/squarespace-host.html) mounts the local map in
+an iframe inside a Squarespace-like wrapper chain, with `scroll-behavior:
+smooth` on `<html>` as the live site has it. **Test scroll changes there** — that
+one CSS rule is what makes naive `scrollTop` writes crawl (see below).
 
 Build for GitHub Pages:
 
@@ -55,7 +77,7 @@ a page that is already live.
    ```
 
    Output: `dist-embed/squarespace-snippet.html` (~21 KB, gitignored).
-   Optional flags: `--height=720`.
+   Optional flags: `--height=600`.
 
 2. Open the file, copy **the whole thing**, and paste it into a Squarespace
    **Code Block** (or a page-level Code Injection) on the map page.
@@ -87,6 +109,7 @@ live dependency on this repo:
   src="https://ORG.github.io/REPO/"
   title="Carte des régions administratives du Québec"
   style="width:100%;height:720px;border:0;display:block;"
+  allow="clipboard-write"
   data-qc-region-pages="/carte-tables-regionales"
   data-qc-contacts="/carte-tables-rgionales-responsables"
   data-qc-contact-region-from="urlId"
@@ -109,10 +132,24 @@ source of truth for both methods, and must be loaded before the bridge. If the
 Squarespace slugs change, edit that file and regenerate/repaste the snippet.
 
 On mobile, the region panel renders **below** the map. The iframe starts at a
-fixed height (e.g. `720px`); the bridge then grows it when the map posts
+fixed height (e.g. `600px`); the bridge then grows it when the map posts
 `quebec-map:resize`.
 
 Wheel / touch over the map is forwarded to the host via `quebec-map:scrollBy`.
+The bridge caches the host's real scroller and eases wheel deltas over a few
+frames; tune the distance with `data-qc-scroll-speed="1.25"` on the iframe (or
+`scrollSpeed` in `mount()`).
+
+**Do not scroll the host with `scrollTop = …` or `window.scrollBy`.** Squarespace
+sets `scroll-behavior: smooth` on `<html>`, which turns every programmatic
+scroll into an eased animation; writing once per frame keeps restarting it and
+the page barely moves (measured on the live page: 400px asked for, 66px
+applied). The bridge uses `scrollTo({ behavior: 'instant' })` and supplies its
+own easing.
+
+Clicking an email address in the map copies it to the clipboard instead of
+opening a mail client — keep `allow="clipboard-write"` on the iframe (without
+it, Chrome blocks the Clipboard API and the embed falls back to `execCommand`).
 
 ## API
 

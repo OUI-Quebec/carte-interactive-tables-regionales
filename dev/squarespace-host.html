@@ -1,0 +1,170 @@
+<!doctype html>
+<!--
+  Dev-only stand-in for the live Squarespace page (www.ouiquebec.org).
+
+  `npm run dev` alone serves the map standalone: no parent frame, so the
+  bridge, the scroll forwarding and the auto-height never run. Open
+
+      http://localhost:5173/dev/squarespace-host.html
+
+  to exercise the embed the way the site does.
+
+  What is reproduced here, and why it matters:
+
+  - `html { scroll-behavior: smooth }` — Squarespace sets this. Under it, a
+    plain `scrollTop = …` write starts an *eased* animation, so writing once
+    per frame keeps restarting it and the page barely moves. Any change to
+    scroll forwarding must be checked with this rule in place.
+  - The block wrapper chain (siteWrapper › #page › … › .sqs-code-container)
+    the bridge walks to find the host's real scroller.
+  - Page content above and below the map, so there is somewhere to scroll.
+
+  Not reproduced: Squarespace's own CSS/JS bundles, and the cross-origin split
+  between the map (github.io) and the host page — here both are localhost, so
+  the iframe's document is reachable from the console. The Clipboard API is
+  more permissive same-origin; verify email copy on the real site too.
+-->
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hôte Squarespace (dev)</title>
+    <style>
+      /* The rule that broke scroll forwarding — keep it. */
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+        color: #1a1a1a;
+      }
+
+      .site-wrapper {
+        max-width: 100%;
+      }
+
+      .page-section {
+        padding: 48px 24px;
+      }
+
+      .filler {
+        max-width: 720px;
+        margin: 0 auto;
+        line-height: 1.6;
+      }
+
+      .filler p {
+        margin: 0 0 1.2em;
+      }
+
+      /* Enough runway above and below to test a real scroll gesture, roughly
+         matching the live page's ~2100px document height. */
+      [data-filler] {
+        height: 600px;
+      }
+
+      .band {
+        background: #f2f5f8;
+      }
+
+      .sqs-code-container {
+        max-width: 1100px;
+        margin: 0 auto;
+      }
+
+      .dev-note {
+        position: fixed;
+        top: 8px;
+        right: 8px;
+        z-index: 10;
+        padding: 6px 10px;
+        border-radius: 6px;
+        background: rgba(10, 10, 10, 0.82);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="dev-note">dev host — imite Squarespace</div>
+
+    <!-- Squarespace-ish wrapper chain around the code block. -->
+    <div id="siteWrapper" class="clearfix site-wrapper">
+      <main id="page" class="container">
+        <article class="page-regions">
+          <section class="page-section band">
+            <div class="content-wrapper">
+              <div class="content">
+                <div class="filler">
+                  <h1>Avant la carte</h1>
+                  <p>
+                    Contenu de remplissage pour avoir de quoi défiler au-dessus
+                    du bloc de code, comme sur la page réelle.
+                  </p>
+                  <p>
+                    Faire défiler la molette <strong>par-dessus la carte</strong> :
+                    la page doit avancer à la même vitesse qu'ailleurs sur la page.
+                  </p>
+                  <p data-filler>&nbsp;</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="content-wrapper">
+              <div class="content">
+                <div class="fluid-engine">
+                  <div class="fe-block">
+                    <div class="sqs-block website-component-block">
+                      <div class="sqs-block-content">
+                        <div class="sqs-code-container">
+                          <iframe
+                            id="qc-map"
+                            src="/"
+                            title="Carte des régions administratives du Québec"
+                            style="width:100%;height:600px;border:0;display:block;"
+                            allow="clipboard-write"
+                            data-qc-region-pages="/carte-tables-regionales"
+                            data-qc-contacts="/carte-tables-rgionales-responsables"
+                            data-qc-contact-region-from="urlId"
+                          ></iframe>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section band">
+            <div class="content-wrapper">
+              <div class="content">
+                <div class="filler">
+                  <h2>Après la carte</h2>
+                  <p>
+                    Sur mobile, le panneau régional s'ouvre sous la carte et le
+                    pont agrandit l'iframe (<code>quebec-map:resize</code>) — ce
+                    contenu doit être repoussé vers le bas.
+                  </p>
+                  <p data-filler>&nbsp;</p>
+                  <p>Fin de page.</p>
+                </div>
+              </div>
+            </div>
+          </section>
+        </article>
+      </main>
+    </div>
+
+    <script src="/embed/content-models.js"></script>
+    <script src="/embed/squarespace-bridge.js"></script>
+    <script>
+      QuebecMapBridge.mount({ iframe: '#qc-map' });
+    </script>
+  </body>
+</html>
