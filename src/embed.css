@@ -681,6 +681,10 @@ body {
   border-bottom: clamp(1px, 0.3vmin, 2px) solid #0a0a0a;
 }
 
+.qc-person-bubble--stacked .qc-person-bubble__photo .qc-person-bubble__photo-img {
+  object-position: center 32%;
+}
+
 .qc-person-bubble__name {
   font-family: Roboto, 'Source Sans 3', 'Segoe UI', system-ui, sans-serif;
   font-size: clamp(0.8rem, 2.2vmin, 1.05rem);
