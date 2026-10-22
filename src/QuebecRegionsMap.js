@@ -944,13 +944,10 @@ export function mountQuebecRegionsMap(el, config) {
       best.corner = 'bl';
     }
 
-    // As low as the card still fits, so the extra height covers the map
-    // instead of sitting in a short box on the top edge.
+    // Centered on the phone, with a margin of map around it for tap-to-close.
     if (isMobileViewport() && opts.stacked) {
-      const minY = Math.round(Math.max(padT, size.y * 0.06));
-      const maxY = Math.max(minY, size.y - padB - BUBBLE_H);
-      best.y = maxY;
-      best.x = Math.max(padL, Math.round((size.x - BUBBLE_W) / 2));
+      best.x = Math.round((size.x - BUBBLE_W) / 2);
+      best.y = Math.round((size.y - BUBBLE_H) / 2);
     }
 
     // Comic tail: base on two adjacent edges near a corner. Bottom (or
@@ -1092,17 +1089,20 @@ export function mountQuebecRegionsMap(el, config) {
     const maxH = Math.min(mapH * 0.58, mapH - 20);
     const stacked = mapW < 480;
 
-    if (hasPhoto) {
-      if (stacked) {
-        const w = Math.round(Math.min(mapW - 12, Math.max(200, mapW * 0.94)));
+    if (stacked) {
+      // 80% of the map, centered, so the margin stays tappable to dismiss.
+      const w = Math.round(mapW * 0.8);
+      const h = Math.round(mapH * 0.8);
+      if (hasPhoto) {
         const bannerH = Math.round(Math.max(22, Math.min(34, mapH * 0.045)));
-        // ~40% more of the map than the previous phone card, with the photo
-        // taking that extra space instead of an empty text well.
-        const h = Math.round(Math.min(mapH - 28, mapH * 0.8));
-        const textH = Math.round(Math.max(84, Math.min(110, mapH * 0.22)));
-        const photoH = Math.max(112, h - bannerH - textH);
+        const textH = Math.round(Math.max(88, Math.min(120, mapH * 0.24)));
+        const photoH = Math.max(120, h - bannerH - textH);
         return { w, h, photoW: w, photoH, stacked: true };
       }
+      return { w, h, stacked: true };
+    }
+
+    if (hasPhoto) {
       const w = Math.round(
         Math.min(maxW, Math.max(240, Math.min(460, mapW * 0.5)))
       );
@@ -1224,22 +1224,27 @@ export function mountQuebecRegionsMap(el, config) {
       })
     });
 
-    // Full black triangle: base on the card edge → apex at region center.
-    const triangle = L.polygon(
-      [layoutCard.base1, layoutCard.base2, layoutCard.target],
-      {
-        pane: 'contactStemPane',
-        color: '#0a0a0a',
-        weight: 0,
-        fillColor: '#0a0a0a',
-        fillOpacity: 1,
-        opacity: 1,
-        interactive: false,
-        className: 'qc-person-bubble-stem'
-      }
-    );
+    const layers = [marker];
+    // The comic tail is for desktop. On a phone the card already sits over
+    // the map, and the triangle was covering the regions under it.
+    if (!metrics.stacked) {
+      const triangle = L.polygon(
+        [layoutCard.base1, layoutCard.base2, layoutCard.target],
+        {
+          pane: 'contactStemPane',
+          color: '#0a0a0a',
+          weight: 0,
+          fillColor: '#0a0a0a',
+          fillOpacity: 1,
+          opacity: 1,
+          interactive: false,
+          className: 'qc-person-bubble-stem'
+        }
+      );
+      layers.unshift(triangle);
+    }
 
-    personBubbleGroup = L.layerGroup([triangle, marker]).addTo(map);
+    personBubbleGroup = L.layerGroup(layers).addTo(map);
   }
 
   /** Map lat/lng of a Laval/Montréal centroid inside the inset frame. */
@@ -1522,18 +1527,19 @@ export function mountQuebecRegionsMap(el, config) {
     const t = e.originalEvent?.target;
     if (
       t?.closest?.(
-        '.qc-map-bubble, .qc-map-pubs-drawer, .qc-map-quantity, .qc-mtl-inset-svg-overlay'
+        '.qc-map-bubble, .qc-person-bubble, .qc-map-pubs-drawer, .qc-map-quantity, .qc-mtl-inset-svg-overlay'
       )
     ) {
       return;
     }
     const hit = findRegionAtLatLng(e.latlng);
-    if (hit) {
+    if (hit && !(isMobileViewport() && selectedId)) {
       activateRegion(hit.id);
       return;
     }
-    // Mobile: a tap on the map background (not a region) dismisses the
-    // open region, the same way the drawer's close button does.
+    // Mobile: the card covers the middle of the map. A tap on the margin
+    // around it dismisses the open region, including when that margin is
+    // still painted as a region.
     if (isMobileViewport() && selectedId) selectRegion(null);
   }
 

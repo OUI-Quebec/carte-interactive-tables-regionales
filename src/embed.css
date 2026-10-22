@@ -591,6 +591,10 @@ body {
   user-select: none;
 }
 
+.qc-person-bubble--stacked {
+  pointer-events: auto;
+}
+
 .qc-person-bubble__banner {
   display: flex;
   flex-wrap: wrap;
@@ -682,8 +686,8 @@ body {
 }
 
 .qc-person-bubble--stacked .qc-person-bubble__photo .qc-person-bubble__photo-img {
-  object-position: center 22%;
-  transform: scale(1.75);
+  object-position: center 24%;
+  transform: scale(1.35);
 }
 
 .qc-person-bubble__name {
