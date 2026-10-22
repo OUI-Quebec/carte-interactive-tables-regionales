@@ -682,7 +682,8 @@ body {
 }
 
 .qc-person-bubble--stacked .qc-person-bubble__photo .qc-person-bubble__photo-img {
-  object-position: center 32%;
+  object-position: center 22%;
+  transform: scale(1.75);
 }
 
 .qc-person-bubble__name {

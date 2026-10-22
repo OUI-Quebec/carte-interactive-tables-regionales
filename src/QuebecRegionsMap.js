@@ -944,12 +944,13 @@ export function mountQuebecRegionsMap(el, config) {
       best.corner = 'bl';
     }
 
-    // Phone cards are full width and used to sit on the bottom of the map,
-    // leaving the open north empty. Pull the top up so the card covers more
-    // of the map above the region.
+    // As low as the card still fits, so the extra height covers the map
+    // instead of sitting in a short box on the top edge.
     if (isMobileViewport() && opts.stacked) {
-      const lift = Math.round(Math.min(84, Math.max(48, size.y * 0.18)));
-      best.y = Math.max(padT, best.y - lift);
+      const minY = Math.round(Math.max(padT, size.y * 0.06));
+      const maxY = Math.max(minY, size.y - padB - BUBBLE_H);
+      best.y = maxY;
+      best.x = Math.max(padL, Math.round((size.x - BUBBLE_W) / 2));
     }
 
     // Comic tail: base on two adjacent edges near a corner. Bottom (or
@@ -1093,14 +1094,13 @@ export function mountQuebecRegionsMap(el, config) {
 
     if (hasPhoto) {
       if (stacked) {
-        const w = Math.round(Math.min(maxW, Math.max(200, mapW * 0.88)));
-        // Shorter than the old full-bleed crop so the face isn't a wide banner.
-        const photoH = Math.round(Math.min(100, Math.max(80, mapH * 0.22)));
-        const textH = Math.round(Math.max(68, Math.min(100, mapH * 0.15)));
+        const w = Math.round(Math.min(mapW - 12, Math.max(200, mapW * 0.94)));
         const bannerH = Math.round(Math.max(22, Math.min(34, mapH * 0.045)));
-        const h = Math.round(
-          Math.min(mapH * 0.72, Math.max(maxH, bannerH + photoH + textH))
-        );
+        // ~40% more of the map than the previous phone card, with the photo
+        // taking that extra space instead of an empty text well.
+        const h = Math.round(Math.min(mapH - 28, mapH * 0.8));
+        const textH = Math.round(Math.max(84, Math.min(110, mapH * 0.22)));
+        const photoH = Math.max(112, h - bannerH - textH);
         return { w, h, photoW: w, photoH, stacked: true };
       }
       const w = Math.round(
