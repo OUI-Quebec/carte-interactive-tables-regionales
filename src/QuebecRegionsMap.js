@@ -181,19 +181,60 @@ export function mountQuebecRegionsMap(el, config) {
   /**
    * Iframe scroll trap: the embed fills the frame with overflow:hidden, so
    * wheel/touch never reaches Squarespace. Forward gestures to the parent.
-   * - Mobile: vertical swipes outside the map stage
-   * - Desktop: wheel anywhere (map zoom is locked)
+   * - Mobile, off the map: vertical swipes scroll the page
+   * - Mobile, on the map: pinch and pan stay on the map; once that pan is
+   *   against the top or bottom bound, the leftover vertical drag scrolls
+   *   the page (same direction as a finger on the page)
+   * - Desktop: wheel anywhere (map zoom is locked), except a panel that
+   *   still has its own scroll room
    */
   function setupParentScrollBridge() {
     if (typeof window === 'undefined' || window.parent === window) return;
 
+    let startX = 0;
+    let startY = 0;
+    let lastX = 0;
     let lastY = 0;
-    let active = false;
+    /** @type {null | 'page' | 'map'} */
+    let mode = null;
+    /** @type {null | 'x' | 'y'} Locked after a few pixels so a pan isn't also a scroll. */
+    let axis = null;
     // Coalesce a burst of wheel/touch events into one message per frame —
     // one postMessage + one scroll write per frame instead of per event.
     let queuedDy = 0;
     let queuedSmooth = true;
     let flushRaf = 0;
+
+    /**
+     * Pixels the view can still pan before maxBounds (viscosity 1) hard-stops.
+     * `north` is a finger-down drag; `south` is a finger-up drag.
+     * Matches the offset limit Map.Drag computes at drag start.
+     */
+    const verticalPanRoom = () => {
+      const maxBounds = map.options.maxBounds;
+      const none = { north: Infinity, south: Infinity };
+      if (!maxBounds || !map._loaded) return none;
+      const size = map.getSize();
+      if (!size?.x || !size?.y) return none;
+      let bounds;
+      try {
+        bounds = L.latLngBounds(maxBounds);
+      } catch {
+        return none;
+      }
+      if (!bounds.isValid()) return none;
+      const nw = map.latLngToContainerPoint(bounds.getNorthWest()).multiplyBy(-1);
+      const se = map
+        .latLngToContainerPoint(bounds.getSouthEast())
+        .multiplyBy(-1)
+        .add(size);
+      const minY = Math.min(nw.y, se.y);
+      const maxY = Math.max(nw.y, se.y);
+      return {
+        north: Math.max(0, maxY),
+        south: Math.max(0, -minY)
+      };
+    };
 
     const touchIsOutsideMap = (target, touch) => {
       if (target instanceof Element && target.closest('.qc-map-stage')) {
@@ -273,34 +314,65 @@ export function mountQuebecRegionsMap(el, config) {
     };
 
     const onTouchStart = (e) => {
-      if (!isMobileViewport() || !e.touches?.[0]) {
-        active = false;
+      axis = null;
+      if (!isMobileViewport() || !e.touches?.[0] || e.touches.length > 1) {
+        mode = null;
         return;
       }
-      if (!touchIsOutsideMap(e.target, e.touches[0])) {
-        active = false;
-        return;
-      }
-      active = true;
-      lastY = e.touches[0].clientY;
+      startX = lastX = e.touches[0].clientX;
+      startY = lastY = e.touches[0].clientY;
+      mode = touchIsOutsideMap(e.target, e.touches[0]) ? 'page' : 'map';
     };
 
     const onTouchMove = (e) => {
-      if (!active || !isMobileViewport() || !e.touches?.[0]) return;
-      if (!touchIsOutsideMap(e.target, e.touches[0])) {
-        active = false;
+      if (!isMobileViewport() || !e.touches?.[0]) return;
+      // Second finger: pinch-zoom owns the gesture.
+      if (e.touches.length > 1) {
+        mode = null;
         return;
       }
+      if (!mode) return;
+
+      const x = e.touches[0].clientX;
       const y = e.touches[0].clientY;
       const dy = lastY - y;
+      lastX = x;
       lastY = y;
-      if (dy === 0) return;
-      e.preventDefault();
-      scrollParentBy(dy, false);
+
+      if (mode === 'page') {
+        if (!touchIsOutsideMap(e.target, e.touches[0])) {
+          mode = null;
+          return;
+        }
+        if (dy === 0) return;
+        e.preventDefault();
+        scrollParentBy(dy, false);
+        return;
+      }
+
+      if (!axis) {
+        const totalX = Math.abs(x - startX);
+        const totalY = Math.abs(y - startY);
+        if (totalX < 4 && totalY < 4) return;
+        axis = totalY >= totalX ? 'y' : 'x';
+      }
+      if (axis !== 'y' || dy === 0) return;
+
+      // Let Leaflet pan while there is room. Only the pixels past the bound
+      // go to the page, so a zoomed-in drag still moves the map first.
+      const room = verticalPanRoom();
+      const available = dy > 0 ? room.south : room.north;
+      const overflow = Math.abs(dy) - available;
+      if (overflow <= 0.5) return;
+      // Claim the gesture once the map can no longer move, otherwise the
+      // browser may scroll the iframe as well as our postMessage.
+      if (available <= 1) e.preventDefault();
+      scrollParentBy(dy > 0 ? overflow : -overflow, false);
     };
 
     const end = () => {
-      active = false;
+      mode = null;
+      axis = null;
     };
 
     const onWheel = (e) => {
@@ -447,10 +519,35 @@ export function mountQuebecRegionsMap(el, config) {
     '08': { x: -0.04, y: 0 },
     '09': { x: 0.06, y: 0.12 }
   };
+  /**
+   * Southern regions whose names collide on a phone at the fitted zoom.
+   * Hidden until the user pinches in. Laval (13) and Montréal (06) stay in
+   * the inset at every zoom; the large peripheral names stay on the map.
+   */
+  const MOBILE_ZOOM_LABEL_IDS = new Set([
+    '01', // Bas-Saint-Laurent
+    '03', // Capitale-Nationale
+    '04', // Mauricie
+    '05', // Estrie
+    '07', // Outaouais
+    '11', // Gaspésie–Îles-de-la-Madeleine
+    '12', // Chaudière-Appalaches
+    '14', // Lanaudière
+    '15', // Laurentides
+    '16', // Montérégie
+    '17' // Centre-du-Québec
+  ]);
+  /**
+   * Levels above the fitted phone zoom before southern names appear.
+   * One level still stacks Laurentides on Lanaudière and Chaudière-Appalaches
+   * on Centre-du-Québec; two levels gives each name its own region.
+   */
+  const MOBILE_DETAIL_LABEL_ZOOM = 2;
 
   /**
-   * Mobile chrome: hide legend; all regions get labels on mobile.
-   * Desktop keeps the legend + the four peripheral MAP_LABELS.
+   * Mobile chrome: hide legend. Large regions are always labeled; the
+   * southern cluster waits until the map is zoomed in (see
+   * syncDetailLabelVisibility). Desktop keeps the legend + MAP_LABELS.
    */
   function syncMobileChrome() {
     const mobile = isMobileViewport();
@@ -531,15 +628,27 @@ export function mountQuebecRegionsMap(el, config) {
       if (!ll) return;
 
       const off = MAP_LABEL_OFFSETS[id] ?? { x: 0, y: 0 };
+      const detail = mobile && MOBILE_ZOOM_LABEL_IDS.has(id);
       const marker = L.marker(ll, {
         interactive: false,
         keyboard: false,
         zIndexOffset: 400,
-        icon: regionLabelIcon(label, off)
+        icon: regionLabelIcon(label, off, detail ? 'qc-region-label--detail' : '')
       });
       regionLabelGroup.addLayer(marker);
     });
     regionLabelGroup.addTo(map);
+    syncDetailLabelVisibility();
+  }
+
+  /** Southern phone labels stay hidden until the fitted view is pinched in. */
+  function syncDetailLabelVisibility() {
+    const minZ = map.getMinZoom();
+    const show =
+      isMobileViewport() &&
+      Number.isFinite(minZ) &&
+      map.getZoom() >= minZ + MOBILE_DETAIL_LABEL_ZOOM;
+    el.classList.toggle('qc-map-root--detail-labels', show);
   }
 
   /**
@@ -593,6 +702,7 @@ export function mountQuebecRegionsMap(el, config) {
       map.setZoom(z, { animate: false });
     }
     syncQuantityFromMap();
+    syncDetailLabelVisibility();
   }
 
   /** @type {GeoJSON.FeatureCollection | null} */
@@ -1408,7 +1518,13 @@ export function mountQuebecRegionsMap(el, config) {
       return;
     }
     const hit = findRegionAtLatLng(e.latlng);
-    if (hit) activateRegion(hit.id);
+    if (hit) {
+      activateRegion(hit.id);
+      return;
+    }
+    // Mobile: a tap on the map background (not a region) dismisses the
+    // open region, the same way the drawer's close button does.
+    if (isMobileViewport() && selectedId) selectRegion(null);
   }
 
   function interactiveRegions() {
@@ -1894,6 +2010,14 @@ export function mountQuebecRegionsMap(el, config) {
         (ev) => {
           const pathEl = hitFrom(ev.target);
           if (!pathEl) {
+            // Inset frame / pale background is not a region. On mobile, with
+            // a region open, that tap dismisses it. Passing the click through
+            // would select whatever administrative region sits under the inset.
+            if (type === 'click' && isMobileViewport() && selectedId) {
+              L.DomEvent.stop(ev);
+              selectRegion(null);
+              return;
+            }
             passThrough(ev);
             return;
           }
@@ -1947,6 +2071,7 @@ export function mountQuebecRegionsMap(el, config) {
     updatePersonBubble();
   }
   map.on('zoom move', onMontrealViewChange);
+  map.on('zoom zoomend', syncDetailLabelVisibility);
   map.on('mousemove', onMapRegionMove);
   map.on('click', onMapRegionClick);
   map.on('mouseout', (e) => {
@@ -2333,6 +2458,7 @@ export function mountQuebecRegionsMap(el, config) {
       hostResizeObserver?.disconnect();
       hostResizeObserver = null;
       map.off('zoom move', onMontrealViewChange);
+      map.off('zoom zoomend', syncDetailLabelVisibility);
       map.off('mousemove', onMapRegionMove);
       map.off('click', onMapRegionClick);
       map.remove();

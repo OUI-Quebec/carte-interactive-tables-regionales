@@ -846,6 +846,11 @@ body {
   white-space: nowrap;
 }
 
+/* Southern names on a phone: hidden at the fitted zoom, shown after a pinch. */
+.qc-map-root--mobile:not(.qc-map-root--detail-labels) .qc-region-label--detail {
+  display: none;
+}
+
 .qc-region-label {
   display: block;
   /* Inline style sets transform on first paint; CSS keeps the fallback. */
